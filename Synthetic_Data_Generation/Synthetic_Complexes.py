@@ -32,13 +32,15 @@ class SimplicialComplex:
 
  
 class CechComplex(SimplicialComplex):
-  def __init__(self, points, epsilon, labels=None, distfcn=distance.euclidean):
+  def __init__(self, points, epsilon, labels=None, distfcn=distance.euclidean, lcc = False):
     self.pts = points
     self.labels = list(range(len(self.pts))) if labels==None or len(labels)!=len(self.pts) else labels
     self.epsilon = epsilon
     self.distfcn = distfcn
+    self.lcc = lcc
     self.network = self.construct_network(self.pts, self.labels, self.epsilon, self.distfcn)
     self.import_simplices(map(tuple, list(nx.find_cliques(self.network))))
+    
  
   def construct_network(self, points, labels, epsilon, distfcn):
     g = nx.Graph()
@@ -50,4 +52,17 @@ class CechComplex(SimplicialComplex):
         dist = distfcn(pair[0][0], pair[1][0])
         if dist <= epsilon:
           g.add_edge(pair[0][1], pair[1][1])
+    
+    if self.lcc:
+      # Gets largest connected component
+      gcc = sorted(nx.connected_components(g), key=len, reverse=True)
+      g0 = g.subgraph(gcc[0])
+      
+      # Relabels nodes and edges
+      nodelist = g0.nodes()
+      self.pts = self.pts[g0.nodes(),:]
+      nodelist.sort()
+      mapping = {old_label:new_label for new_label, old_label in enumerate(nodelist)}
+      g0rel = nx.relabel_nodes(g0, mapping)
+      return g0rel
     return g
