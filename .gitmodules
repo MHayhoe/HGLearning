@@ -1,0 +1,3 @@
+[submodule "graph-neural-networks"]
+	path = graph-neural-networks
+	url = https://github.com/alelab-upenn/graph-neural-networks.git
