@@ -4,7 +4,6 @@ def generate_hypergraph_diffusion(sc, n_samples, n_sources, source_upper, timest
 
     # get the number of nodes
     n = sc.pts.shape[0]
-    print(n)
 
     # compute the gso for the hypergraph (weighted by involvement in multiple hyperedges)
     gso = np.zeros((n,n))

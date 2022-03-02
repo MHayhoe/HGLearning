@@ -17,6 +17,8 @@ class SimplicialComplex:
   def import_simplices(self, simplices=[]):
     self.simplices = list(map(lambda simplex: tuple(sorted(simplex)), simplices))
     self.face_set = self.faces()
+    self.bms = self.boundary_maps()
+    self.hodge_laps = self.hodge_laplacians()
 
   def faces(self):
     faceset = set()
@@ -29,6 +31,40 @@ class SimplicialComplex:
 
   def n_faces(self, n):
     return list(filter(lambda face: len(face)==n+1, self.face_set))
+
+  def boundary_maps(self):
+    # B_0 = 0
+    maps = [0]
+    order = 1
+    while len(self.n_faces(order+1)) > 0:
+      n_faces_O = self.n_faces(order)
+      n_faces_OP1 = self.n_faces(order+1)
+      bm = np.zeros((len(n_faces_O), len(n_faces_OP1)))
+
+      for i, nfo in enumerate(n_faces_O):
+        for j, nfo1 in enumerate(n_faces_OP1):
+          if set(nfo).issubset(set(nfo1)): 
+            # TO_DO - Figure out orientation problem
+            bm[i,j] = 1
+      maps.append(bm)
+
+      order += 1
+
+    return maps
+
+  def hodge_laplacians(self):
+    hodge_laps = []
+
+    for order in range(len(self.bms) - 1):
+      if order == len(self.bms):
+        hl = self.bms[order].T @ self.bms[order]
+      elif order == 0:
+        hl = self.bms[order+1] @ self.bms[order+1].T
+      else:
+        hl = self.bms[order].T @ self.bms[order] + self.bms[order+1] @ self.bms[order+1].T
+      hodge_laps.append(hl)
+
+    return hodge_laps
 
  
 class CechComplex(SimplicialComplex):
