@@ -1,4 +1,3 @@
-import numpy as np
 import jax.numpy as jnp
 from jax import grad, jit
 import networkx as nx
@@ -14,7 +13,7 @@ class Hypergraph:
     def energy_fn(self, x):
         energy = 0
         for hedge in self.hyperedges:
-            energy += np.max((x[hedge] - x[hedge])**2)
+            energy += jnp.max((x[hedge, jnp.newaxis] - x[hedge])**2)
         return energy
 
     # Returns the Laplacian operator, i.e., the gradient of the energy
