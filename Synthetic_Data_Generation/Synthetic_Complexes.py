@@ -17,8 +17,14 @@ class SimplicialComplex:
 
     def import_simplices(self, simplices=[]):
         self.simplices = list(map(lambda simplex: tuple(sorted(simplex)), simplices))
+
+        print('Finding faces...')
         self.face_set = self.faces()
+
+        print('Computing boundary maps...')
         self.bms = self.boundary_maps()
+
+        print('Finding Hodge Laplacians...')
         self.hodge_laps = self.hodge_laplacians()
 
     def faces(self):
@@ -64,21 +70,20 @@ class SimplicialComplex:
     def boundary_maps(self):
         # B_0 = 0
         maps = [0]
-        order = 1
-        while len(self.n_faces(order + 1)) > 0:
+        max_order = max(map(len,self.face_set)) - 1
+        pbar = tqdm(total=max_order)
+        for order in range(max_order):
             n_faces_O = self.n_faces(order)
             n_faces_OP1 = self.n_faces(order + 1)
             bm = np.zeros((len(n_faces_O), len(n_faces_OP1)))
-
             for i, nfo in enumerate(n_faces_O):
                 for j, nfo1 in enumerate(n_faces_OP1):
                     if set(nfo).issubset(set(nfo1)):
-                        # TO_DO - Figure out orientation problem
                         bm[i, j] = self.simplex_orientation(nfo, nfo1)
             maps.append(bm)
-
+            pbar.update(1)
             order += 1
-
+            
         return maps
 
     def hodge_laplacians(self):
@@ -103,7 +108,11 @@ class CechComplex(SimplicialComplex):
         self.epsilon = epsilon
         self.distfcn = distfcn
         self.lcc = lcc
+
+        print('Constructing Network...')
         self.network = self.construct_network(self.pts, self.labels, self.epsilon, self.distfcn)
+        
+        print('Creating Simplices...')
         self.import_simplices(map(tuple, list(nx.find_cliques(self.network))))
 
     def construct_network(self, points, labels, epsilon, distfcn):

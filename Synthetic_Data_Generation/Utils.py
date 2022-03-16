@@ -5,7 +5,8 @@ from matplotlib.collections import PatchCollection
 
 def plot_2d_sc(sc):
     fig, ax = plt.subplots()
-    points = sc.pts
+    print(sc.pts.shape)
+    points = sc.pts[:,:2]
     plt.scatter(points[:,0], points[:,1])
 
 
