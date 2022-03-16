@@ -40,32 +40,42 @@ class SimplicialComplex:
         return list(filter(lambda face: len(face) == n + 1, self.face_set))
 
     def simplex_orientation(self, face, coface):
-        # Relabel node IDs, ensuring we have only 0,...,k
         order = len(coface) - 1
-        coface_ids = [coface.index(i) for i in face]
 
-        while max(coface_ids) == order:
-            coface_ids = [(i + 1) % (order + 1) for i in coface_ids]
-
-        # Compute parity
-        num_transpositions = 0
-        seen = np.zeros(order, bool)
-        for i in range(order):
-            if seen[i]:
-                pass
+        # If the coface is an edge, just check if the face (node) is the head or tail
+        if order == 1:
+            # Edges point head -> tail. If this is the head node, return -1. Otherwise, return 1.
+            if coface.index(face[0]) == 0:
+                return -1
             else:
-                seen[i] = True
-                j = coface_ids[i]
-                while not seen[j]:
-                    seen[j] = True
-                    num_transpositions += 1
-                    j = coface_ids[j]
-
-        # If parity is even, we match the reference orientation
-        if num_transpositions % 2 == 0:
-            return 1
+                return 1
+        # Otherwise, we must count transpositions
         else:
-            return -1
+            # Relabel node IDs, ensuring we have only 0,...,k
+            coface_ids = [coface.index(i) for i in face]
+
+            while max(coface_ids) == order:
+                coface_ids = [(i + 1) % (order + 1) for i in coface_ids]
+
+            # Compute parity
+            num_transpositions = 0
+            seen = np.zeros(order, bool)
+            for i in range(order):
+                if seen[i]:
+                    pass
+                else:
+                    seen[i] = True
+                    j = coface_ids[i]
+                    while not seen[j]:
+                        seen[j] = True
+                        num_transpositions += 1
+                        j = coface_ids[j]
+
+            # If parity is even, we match the reference orientation
+            if num_transpositions % 2 == 0:
+                return 1
+            else:
+                return -1
 
     def boundary_maps(self):
         # B_0 = 0
