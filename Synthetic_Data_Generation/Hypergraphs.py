@@ -24,7 +24,7 @@ class Hypergraph:
         energy = 0
         for hedge in self.hyperedges:
             hedge = jnp.array(hedge)
-            energy += jnp.max((x[hedge, jnp.newaxis] - x[hedge])**2)
+            energy += jnp.max((x[hedge, jnp.newaxis] - x[hedge])**2) / hedge.size
         return energy
 
     # Returns the Laplacian operator, i.e., half the gradient of the energy
