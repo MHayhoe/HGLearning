@@ -35,7 +35,7 @@ def plot_diffusion(H, x, num_steps=1):
 
 def plot_2d_sc(sc):
     fig, ax = plt.subplots()
-    points = sc.pts[:2]
+    points = sc.pts[:,:2]
     plt.scatter(points[:,0], points[:,1])
 
 

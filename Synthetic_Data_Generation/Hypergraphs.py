@@ -9,6 +9,7 @@ class Hypergraph:
         self.N = 0
         self.node_map = {}
         self.hyperedges = list(map(lambda hedge: sorted([self.map_node(v) for v in hedge]), hyperedges))
+        self.M = len(self.hyperedges)
         self.laplacian = self.laplacian_operator()
 
     # Maps nodes. If it's been seen before, this assigns the old value, otherwise increments node count.
@@ -42,13 +43,14 @@ class Hypergraph:
     def sc_dual(self):
         # First, constructs a simple graph, with hyperedges as nodes and edges between hnodes
         # if they share a node in the hypergraph
+        hyperedge_tuples = [tuple(hedge) for hedge in self.hyperedges]
         g = nx.Graph()
-        g.add_nodes_from(self.hyperedges)
+        g.add_nodes_from(hyperedge_tuples)
 
-        for hedge1 in range(len(self.hyperedges)-1):
-            for hedge2 in range(hedge1+1, len(self.hyperedges)):
-                if len(set(self.hyperedges[hedge1]) & set(self.hyperedges[hedge2])) > 0:
-                    g.add_edge(self.hyperedges[hedge1],self.hyperedges[hedge2])
+        for hedge1 in range(self.M - 1):
+            for hedge2 in range(hedge1+1, self.M):
+                if len(set(hyperedge_tuples[hedge1]) & set(hyperedge_tuples[hedge2])) > 0:
+                    g.add_edge(hyperedge_tuples[hedge1], hyperedge_tuples[hedge2])
         
         # Next, find cliques in this graph
         simplices = map(tuple, list(nx.find_cliques(g)))

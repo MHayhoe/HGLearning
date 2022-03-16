@@ -132,7 +132,7 @@ class CechComplex(SimplicialComplex):
             g0 = g.subgraph(gcc[0])
 
             # Relabels nodes and edges
-            nodelist = g0.nodes()
+            nodelist = list(g0.nodes())
             self.pts = self.pts[g0.nodes(), :]
             nodelist.sort()
             mapping = {old_label: new_label for new_label, old_label in enumerate(nodelist)}
