@@ -6,14 +6,14 @@ import networkx as nx
 from scipy.spatial import distance
 from itertools import product
 from tqdm import tqdm
-
+from numpy.linalg import matrix_power
 
 # Code from https://datawarrior.wordpress.com/tag/cech-complex/
 
 class SimplicialComplex:
-    def __init__(self, simplices=[], signals = []):
+    def __init__(self, simplices=[], signals = None):
         self.import_simplices(simplices=simplices)
-
+        self.import_signals(signals)
 
     def import_simplices(self, simplices=[]):
         self.simplices = list(map(lambda simplex: tuple(sorted(simplex)), simplices))
@@ -26,6 +26,19 @@ class SimplicialComplex:
 
         print('Finding Hodge Laplacians...')
         self.hodge_laps = self.hodge_laplacians()
+
+    def import_signals(self, signals = None):
+        self.signals = []
+        max_order = max(map(len, self.face_set))
+        pbar = tqdm(total=max_order)
+        if signals:
+            for order in range(max_order):
+                assert signals[order].shape[0] == len(self.n_faces(order)),\
+                    f'Number of signals does not match number of faces for order {order}'
+                self.signals.append(signals[order])
+        else:
+            for order in range(max_order):
+                self.signals.append(np.zeros((len(self.n_faces(order)),1)))
 
     def faces(self):
         faceset = set()
@@ -98,9 +111,8 @@ class SimplicialComplex:
 
     def hodge_laplacians(self):
         hodge_laps = []
-
-        for order in range(len(self.bms) - 1):
-            if order == len(self.bms):
+        for order in range(len(self.bms)):
+            if order == len(self.bms) - 1:
                 hl = self.bms[order].T @ self.bms[order]
             elif order == 0:
                 hl = self.bms[order + 1] @ self.bms[order + 1].T
@@ -110,6 +122,11 @@ class SimplicialComplex:
 
         return hodge_laps
 
+    def diffuse(self, k=1):
+        diffused_signal = []
+        for i, signal in enumerate(self.signals):
+            diffused_signal.append(matrix_power(self.hodge_laps[i], k) @ signal)
+        return diffused_signal
 
 class CechComplex(SimplicialComplex):
     def __init__(self, points, epsilon, labels=None, distfcn=distance.euclidean, lcc=False):

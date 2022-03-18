@@ -5,13 +5,15 @@ from Utils import *
 from Hypergraphs import *
 
 if __name__=="__main__":
-    h = Hypergraph([(1,2,3),(2,3,4,5),(4,7),(5,6),(3,5)])
-    hd = h.sc_dual()
-    print(hd.simplices)
-    print(hd.boundary_maps())
-    print(hd.hodge_laps)
-
-    
+    signals = np.ones((7, 4))
+    h = Hypergraph([(1,2,3),(2,3,4,5),(4,7),(5,6),(3,5)], signals=signals)
+    sc = h.sc_dual()
+    print(sc.simplices)
+    print(sc.boundary_maps())
+    print(sc.hodge_laps)
+    ds = sc.diffuse(5)
+    print(ds)
+    '''
     shape = 'torus' # unit or torus
     n_points = 1000
     epsilon = 0.4
@@ -31,4 +33,4 @@ if __name__=="__main__":
     # print(generate_hypergraph_diffusion(SC, 2000, 20, 10, 5))
 
     plot_2d_sc(SC)
-    
+    '''
