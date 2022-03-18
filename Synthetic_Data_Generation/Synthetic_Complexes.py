@@ -10,10 +10,10 @@ from tqdm import tqdm
 
 # Code from https://datawarrior.wordpress.com/tag/cech-complex/
 
-
 class SimplicialComplex:
-    def __init__(self, simplices=[]):
+    def __init__(self, simplices=[], signals = []):
         self.import_simplices(simplices=simplices)
+
 
     def import_simplices(self, simplices=[]):
         self.simplices = list(map(lambda simplex: tuple(sorted(simplex)), simplices))
