@@ -11,10 +11,10 @@ from numpy.linalg import matrix_power
 # Code from https://datawarrior.wordpress.com/tag/cech-complex/
 
 class SimplicialComplex:
-    def __init__(self, simplices=[], signals = None):
+    def __init__(self, simplices=[]):
         self.import_simplices(simplices=simplices)
-        self.import_signals(signals)
 
+    # Method to ingest simplices, build face set, construct boundary maps and hodge laplacians
     def import_simplices(self, simplices=[]):
         self.simplices = list(map(lambda simplex: tuple(sorted(simplex)), simplices))
 
@@ -24,22 +24,11 @@ class SimplicialComplex:
         print('Computing boundary maps...')
         self.bms = self.boundary_maps()
 
+
         print('Finding Hodge Laplacians...')
         self.hodge_laps = self.hodge_laplacians()
 
-    def import_signals(self, signals = None):
-        self.signals = []
-        max_order = max(map(len, self.face_set))
-        pbar = tqdm(total=max_order)
-        if signals:
-            for order in range(max_order):
-                assert signals[order].shape[0] == len(self.n_faces(order)),\
-                    f'Number of signals does not match number of faces for order {order}'
-                self.signals.append(signals[order])
-        else:
-            for order in range(max_order):
-                self.signals.append(np.zeros((len(self.n_faces(order)),1)))
-
+    # Method to build faces from top-order simplices
     def faces(self):
         faceset = set()
         for simplex in tqdm(self.simplices):
@@ -49,9 +38,11 @@ class SimplicialComplex:
                     faceset.add(face)
         return faceset
 
+    # Returns all faces of order n
     def n_faces(self, n):
         return list(filter(lambda face: len(face) == n + 1, self.face_set))
 
+    # Finds the orientation of a simplex
     def simplex_orientation(self, face, coface):
         order = len(coface) - 1
 
@@ -90,6 +81,7 @@ class SimplicialComplex:
             else:
                 return -1
 
+    # Constructs boundary maps
     def boundary_maps(self):
         # B_0 = 0
         maps = [0]
@@ -109,9 +101,10 @@ class SimplicialComplex:
             
         return maps
 
+    # Creates hodge laplacians from boundary maps
     def hodge_laplacians(self):
         hodge_laps = []
-        for order in range(len(self.bms)):
+        for order in tqdm(range(len(self.bms))):
             if order == len(self.bms) - 1:
                 hl = self.bms[order].T @ self.bms[order]
             elif order == 0:
@@ -122,19 +115,21 @@ class SimplicialComplex:
 
         return hodge_laps
 
-    def diffuse(self, k=1):
+    # Diffuses a signal x by k hops
+    def diffuse(self, x, k=1):
         diffused_signal = []
-        for i, signal in enumerate(self.signals):
+        for i, signal in enumerate(x):
             diffused_signal.append(matrix_power(self.hodge_laps[i], k) @ signal)
         return diffused_signal
 
+# Class built on Simplicial Complex base class to build a Cech Complex
 class CechComplex(SimplicialComplex):
     def __init__(self, points, epsilon, labels=None, distfcn=distance.euclidean, lcc=False):
-        self.pts = points
-        self.labels = list(range(len(self.pts))) if labels == None or len(labels) != len(self.pts) else labels
-        self.epsilon = epsilon
-        self.distfcn = distfcn
-        self.lcc = lcc
+        self.pts = points # location of points (n x d dimensional)
+        self.labels = list(range(len(self.pts))) if labels == None or len(labels) != len(self.pts) else labels # what we label the points as
+        self.epsilon = epsilon # Max distance to draw an edge between
+        self.distfcn = distfcn # How distance is computed
+        self.lcc = lcc # boolean to only keep largest connected component
 
         print('Constructing Network...')
         self.network = self.construct_network(self.pts, self.labels, self.epsilon, self.distfcn)
@@ -142,6 +137,7 @@ class CechComplex(SimplicialComplex):
         print('Creating Simplices...')
         self.import_simplices(map(tuple, list(nx.find_cliques(self.network))))
 
+    # Constructs the network from points
     def construct_network(self, points, labels, epsilon, distfcn):
         g = nx.Graph()
         g.add_nodes_from(labels)
@@ -153,6 +149,7 @@ class CechComplex(SimplicialComplex):
                 if dist <= epsilon:
                     g.add_edge(pair[0][1], pair[1][1])
 
+        # If only keeping largest connected component
         if self.lcc:
             # Gets largest connected component
             gcc = sorted(nx.connected_components(g), key=len, reverse=True)
