@@ -125,7 +125,7 @@ nTest = 200  # Number of testing samples
 tMax = 25  # Maximum number of diffusion times (A^t for t < tMax)
 
 nDataRealizations = 10  # Number of data realizations
-nGraphRealizations = 10  # Number of graph realizations
+nGraphRealizations = 3  # Number of graph realizations
 nClasses = 5  # Number of source nodes to select
 
 nNodes = 100  # Number of nodes
@@ -204,8 +204,8 @@ writeVarValues(varsFile,
 # Select pooling options (node ordering for zero-padding)
 doDegree = True
 doSpectralProxies = True
-doEDS = True
-doCoarsening = True
+doEDS = False
+doCoarsening = False
 
 # Select desired architectures
 doSelectionGNN = True
@@ -705,7 +705,7 @@ for graph in range(nGraphRealizations):
             # Now, this dictionary has all the hyperparameters that we need to
             # pass to the architecture function, but it also has other keys
             # that belong to the more general model (like 'name' or 'device'),
-            # so we need to extract them and save them in seperate variables
+            # so we need to extract them and save them in separate variables
             # for future use.
             thisName = modelDict.pop('name')
             callArchit = modelDict.pop('archit')
@@ -714,7 +714,7 @@ for graph in range(nGraphRealizations):
             thisEvaluator = modelDict.pop('evaluator')
 
             # If more than one graph or data realization is going to be 
-            # carried out, we are going to store all of thos models
+            # carried out, we are going to store all of those models
             # separately, so that any of them can be brought back and
             # studied in detail.
             if nGraphRealizations > 1:

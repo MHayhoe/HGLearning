@@ -9,9 +9,9 @@ if __name__ == '__main__':
     ### Example of moving from Hypergraph -> Simplicial Complex 
     H = Hypergraph([[1, 2, 3], [2, 3, 4], [4, 5],[1,6,7,8]])
     x = np.random.rand(H.N) * 2 - 1  
-    num_steps = 5
+    num_steps = 20
 
-    plot_diffusion(H, x, num_steps) # Hypergraph Diffusion
+    plot_diffusion(H, x, num_steps)  # Hypergraph Diffusion
 
     h = Hypergraph([(1,2,3),(2,3,4,5),(4,7),(5,6),(3,5)])
     sc, sc_signal = h.sc_dual(x)
