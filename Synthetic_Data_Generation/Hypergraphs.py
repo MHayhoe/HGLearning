@@ -36,9 +36,21 @@ class Hypergraph:
         return x.shape[0] == self.N
 
     # Diffuses the signal x according to L for k times, i.e., x(t+1) = x(t) - L(x(t)).
-    def diffuse(self, x=None, k=1):
-        for _ in range(k):
-            x = x - self.laplacian(x)
+    def diffuse(self, x0=None, k=1):
+        x = np.zeros((k+1, self.N))
+        if x0 is not None:
+            assert x0.shape[0] == self.N
+            x[0, :] = x0
+
+        for t in range(k):
+            x[t+1, :] = x[t, :] - self.laplacian(x[t, :])
+
+        # Remove the initial signal
+        x = x[1:, :]
+
+        # If we only diffused once, remove the time dimension
+        if k == 1:
+            x = np.squeeze(x)
 
         return x
 
