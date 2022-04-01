@@ -1,5 +1,5 @@
 import numpy as np
-
+import torch
 from Utils import *
 from Hypergraphs import *
 from Source_Localization import hypergraphSources
@@ -14,7 +14,9 @@ if __name__ == '__main__':
     nTest = 2
     sourceHyperedges = [0, 1]
     num_steps = 20
+    useGPU = True
 
-    data = hypergraphSources(H, nTrain, nValid, nTest, sourceHyperedges, tMax=num_steps)
+    data = hypergraphSources(H, nTrain, nValid, nTest, sourceHyperedges, tMax=num_steps, dataType=torch.float64,
+                             device='cuda:0' if (useGPU and torch.cuda.is_available()) else 'cpu')
     print(data.samples)
     # plot_diffusion(H, x, num_steps)

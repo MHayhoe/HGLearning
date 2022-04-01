@@ -57,13 +57,13 @@ from alegnn.utils.miscTools import saveSeed
 startRunTime = datetime.datetime.now()
 
 from gnn_data.dataTools import dataMisinformation
-from learner.selectionGNN import SelectionGNN_DB
-from learner.aggregationGNN import AggregationGNN_DB
-from learner.subgraphAggregationGNN import SubgraphAggregationGNN
+from architectures import LocalGNNCliqueLine
+# from learner.aggregationGNN import AggregationGNN_DB
+# from learner.subgraphAggregationGNN import SubgraphAggregationGNN
 from learner.trainerMisinformation import TrainerMisinformation
 import learner.evaluatorMisinformation as EvaluateMisinformation
 
-possible_gnn_models = ['subAggregationGNN', 'aggregationGNN']
+possible_gnn_models = ['LocalGNNCliqueLine']
 figSize = 7  # Overall size of the figure that contains the plot
 lineWidth = 2  # Width of the plot lines
 markerShape = 'o'  # Shape of the markers
@@ -89,9 +89,8 @@ def train_helper(learner_params, train_params, dataset_params, directory):
     #   Numpy seeds
     numpyState = np.random.RandomState().get_state()
     #   Collect all random states
-    randomStates = []
-    randomStates.append({'module': 'numpy', 'state': numpyState})
-    randomStates.append({'module': 'torch', 'state': torchState, 'seed': torchSeed})
+    randomStates = [{'module': 'numpy', 'state': numpyState},
+                    {'module': 'torch', 'state': torchState, 'seed': torchSeed}]
 
     #   This list and dictionary follows the format to then be loaded, if needed,
     #   by calling the loadSeed function in Utils.miscTools
@@ -102,6 +101,15 @@ def train_helper(learner_params, train_params, dataset_params, directory):
     writeVarValues(varsFile, train_params)
     writeVarValues(varsFile, dataset_params)
 
+    #########
+    # GRAPH #
+    #########
+
+    with open(dataset_params['matrix_path'] + '_GSOs.pkl', 'r') as f:
+        GSOs = f.read()
+    with open(dataset_params['matrix_path'] + '_incidence_matrices.pkl', 'r') as f:
+        incidence_matrices = f.read()
+
     ########
     # DATA #
     ########
@@ -109,17 +117,8 @@ def train_helper(learner_params, train_params, dataset_params, directory):
 
     print('cuda:0' if (torch.cuda.is_available()) else 'cpu')
     print(torch.cuda.device_count())
-    data = dataMisinformation(
-        dataset_params['data_path'],
-        dataset_params['prop_data_train'],
-        dataset_params['prop_data_valid'],
-        dataset_params['prop_data_test'],
-        dataset_params['matrix_type'],
-        dataset_params['seed'],
-        dataType=torch.float64,
-        device='cuda:0' if (useGPU and torch.cuda.is_available()) else 'cpu',
-        balanceClasses=dataset_params['balance_classes']
-    )
+    with open(dataset_params['data_path'], 'r') as f:
+        data = f.read()
 
     ############
     # TRAINING #
@@ -154,101 +153,89 @@ def train_helper(learner_params, train_params, dataset_params, directory):
     assert learner_params['gnn_model'] in possible_gnn_models, (
             'selected GNN model not in ' + str(possible_gnn_models))
 
-    if learner_params['gnn_model'] == 'selectionGNN':
+    if learner_params['gnn_model'] == 'LocalGNNCliqueLine':
         # \\\ Basic parameters for the Selection GNN architecture
 
-        hParamsSelGNN = {}  # Hyperparameters for the SelectionGNN (selGNN)
+        hParamsLocGNN = {'name': 'LocGNN_CL',
+                         'archit': LocalGNNCliqueLine,
+                         'device': 'cuda:0' if (useGPU and torch.cuda.is_available()) else 'cpu',
+                         'dimSignals': learner_params['dim_features'],
+                         'nFilterTaps': learner_params['n_filter_taps'],
+                         'bias': learner_params['bias'],
+                         'nonlinearity': nonlinearity,
+                         'nSelectedNodes': None,
+                         'poolingFunction': pooling_function,
+                         'poolingSize': learner_params['pooling_size'],
+                         'dimReadout': learner_params['dim_readout'],
+                         'GSOs': GSOs,
+                         'incidence_matrices': incidence_matrices}  # Hyperparameters for the SelectionGNN (selGNN)
 
-        hParamsSelGNN['name'] = 'SelGNN'
         # Chosen architecture
-        hParamsSelGNN['archit'] = SelectionGNN_AD
-        hParamsSelGNN['device'] = 'cuda:0' \
-            if (useGPU and torch.cuda.is_available()) \
-            else 'cpu'
 
         # Graph convolutional parameters
-        hParamsSelGNN['dimNodeSignals'] = learner_params['dim_features']  # Features per layer
-        hParamsSelGNN['nFilterTaps'] = learner_params['n_filter_taps']  # Number of filter taps
-        hParamsSelGNN['bias'] = learner_params['bias']  # Decide whether to include a bias term
         # Nonlinearity
-        hParamsSelGNN['nonlinearity'] = nonlinearity  # Selected nonlinearity
         # is affected by the summary
         # Readout layer: local linear combination of features
-        hParamsSelGNN['dimReadout'] = learner_params['dim_readout']  # Dimension of the fully connected
         # layers after the GCN layers (map); this fully connected layer
         # is applied only at each node, without any further exchanges nor
         # considering all nodes at once, making the architecture entirely
         # local.
         # Graph structure
-        hParamsSelGNN['dimEdgeFeatures'] = learner_params['dim_edge_features']  # Scalar edge weights
-        hParamsSelGNN['dimAnomScoreReadout'] = learner_params['dim_anom_score_readout']
-        hParamsSelGNN['nNodes'] = n_nodes
-        hParamsDict = hParamsSelGNN
+        hParamsDict = hParamsLocGNN
     elif learner_params['gnn_model'] == 'aggregationGNN':
         # \\\ Basic parameters for the Aggregation GNN architecture
 
-        hParamsAggGNN = {}  # Hyperparameters for the AggregationGNN (aggGNN)
+        hParamsAggGNN = {'name': 'AggGNN',
+                         'archit': LocalGNNCliqueLine,
+                         'device': 'cuda:0' if (useGPU and torch.cuda.is_available()) else 'cpu',
+                         'dimFeatures': learner_params['dim_features'],
+                         'nFilterTaps': learner_params['num_filter_taps'],
+                         'bias': learner_params['bias'],
+                         'nonlinearity': nonlinearity,
+                         'poolingFunction': pooling_function,
+                         'poolingSize': learner_params['pooling_size'],
+                         'dimReadout': learner_params['dim_readout'],
+                         'dimEdgeFeatures': learner_params['dim_edge_features'],
+                         'nExchanges': learner_params['num_exchanges'],
+                         'timestepDelay': learner_params['time_delay'],
+                         'summaryStatistics': learner_params['summary_statistics'],
+                         'numDifGSOs': learner_params['num_GSOs'],
+                         'interactionEffects': learner_params['interaction_effects']}  # Hyperparameters for the AggregationGNN (aggGNN)
 
-        hParamsAggGNN['name'] = 'AggGNN'
         # Chosen architecture
-        hParamsAggGNN['archit'] = AggregationGNN_DB
-        hParamsAggGNN['device'] = 'cuda:0' \
-            if (useGPU and torch.cuda.is_available()) \
-            else 'cpu'
 
         # Graph convolutional parameters
-        hParamsAggGNN['dimFeatures'] = learner_params['dim_features']  # Features per layer
-        hParamsAggGNN['nFilterTaps'] = learner_params['num_filter_taps']  # Number of filter taps
-        hParamsAggGNN['bias'] = learner_params['bias']  # Decide whether to include a bias term
         # Nonlinearity
-        hParamsAggGNN['nonlinearity'] = nonlinearity  # Selected nonlinearity
         # is affected by the summary
-        hParamsAggGNN['poolingFunction'] = pooling_function  # Selected pooling function
-        hParamsAggGNN['poolingSize'] = learner_params['pooling_size']  # Selected pooling size per layer
         # Readout layer: local linear combination of features
-        hParamsAggGNN['dimReadout'] = learner_params['dim_readout']  # Dimension of the fully connected
         # layers after the GCN layers (map)
         # Graph structure
-        hParamsAggGNN['dimEdgeFeatures'] = learner_params['dim_edge_features']  # Int of num Edge Features
-        hParamsAggGNN['nExchanges'] = learner_params['num_exchanges']  # Max Number of exchanges (k-hops)
 
-        hParamsAggGNN['timestepDelay'] = learner_params['time_delay']  # Num of timestep delays considered
-        hParamsAggGNN['summaryStatistics'] = learner_params[
-            'summary_statistics']  # Sum Stats used to compress node-signals
-        hParamsAggGNN['numDifGSOs'] = learner_params['num_GSOs']  # Number GSOs in the multigraph
-        hParamsAggGNN['interactionEffects'] = learner_params[
-            'interaction_effects']  # Whether or not to consider interaction effects
         hParamsDict = hParamsAggGNN
     elif learner_params['gnn_model'] == 'subAggregationGNN':
         # \\\ Basic parameters for the Subgraph Aggregation GNN architecture
 
-        hParamsSubAggGNN = {}  # Hyperparameters for the AggregationGNN (aggGNN)
-
-        hParamsSubAggGNN['name'] = 'SubAggGNN'
+        hParamsSubAggGNN = {'name': 'SubAggGNN',
+                            'archit': LocalGNNCliqueLine,
+                            'device': 'cuda:0' if (useGPU and torch.cuda.is_available()) else 'cpu',
+                            'dimFeatures': learner_params['dim_features'],
+                            'nFilterTaps': learner_params['num_filter_taps'],
+                            'bias': learner_params['bias'],
+                            'nonlinearity': nonlinearity,
+                            'poolingFunction': pooling_function,
+                            'poolingSize': learner_params['pooling_size'],
+                            'dimReadout': learner_params['dim_readout'],
+                            'dimEdgeFeatures': learner_params['dim_edge_features'],
+                            'nExchanges': learner_params['num_exchanges'],
+                            'embeddingPooling': learner_params['embedding_pooling']}  # Hyperparameters for the AggregationGNN (aggGNN)
         # Chosen architecture
-        hParamsSubAggGNN['archit'] = SubgraphAggregationGNN
-        hParamsSubAggGNN['device'] = 'cuda:0' \
-            if (useGPU and torch.cuda.is_available()) \
-            else 'cpu'
-
         # Graph convolutional parameters
-        hParamsSubAggGNN['dimFeatures'] = learner_params['dim_features']  # Features per layer
-        hParamsSubAggGNN['nFilterTaps'] = learner_params['num_filter_taps']  # Number of filter taps
-        hParamsSubAggGNN['bias'] = learner_params['bias']  # Decide whether to include a bias term
         # Nonlinearity
-        hParamsSubAggGNN['nonlinearity'] = nonlinearity  # Selected nonlinearity
         # is affected by the summary
-        hParamsSubAggGNN['poolingFunction'] = pooling_function  # Selected pooling function
-        hParamsSubAggGNN['poolingSize'] = learner_params['pooling_size']  # Selected pooling size per layer
         # Readout layer: local linear combination of features
-        hParamsSubAggGNN['dimReadout'] = learner_params['dim_readout']  # Dimension of the fully connected
         # layers after the GCN layers (map)
         # Graph structure
-        hParamsSubAggGNN['dimEdgeFeatures'] = learner_params['dim_edge_features']  # Int of num Edge Features
-        hParamsSubAggGNN['nExchanges'] = learner_params['num_exchanges']  # Max Number of exchanges (k-hops)
 
-        hParamsSubAggGNN['embeddingPooling'] = learner_params[
-            'embedding_pooling']  # Sum Stats used to pool node-signals
         hParamsDict = hParamsSubAggGNN
     else:
         raise ValueError('gnn model in cfg not available')
@@ -535,8 +522,8 @@ def run_experiment(args, section_name=''):
     }
 
     dataset_params = {
-        'matrix_type': args.get('matrix_type', 'adjNorm'),
-        'data_path': args.get('data_path', 'data/reddit_data.pkl'),
+        'matrix_path': args.get('matrix_path', 'data/sourceLoc'),
+        'data_path': args.get('data_path', 'data/sourceLoc_data.pkl'),
         'normalize_graph_signal': args.getboolean('normalize_graph_signal', False),
         'prop_data_train': args.getfloat('prop_data_train', 0.6),
         'prop_data_valid': args.getfloat('prop_data_valid', 0.2),
