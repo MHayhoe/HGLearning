@@ -1,4 +1,5 @@
 import numpy as np
+import pickle
 import torch
 from Utils import *
 from Hypergraphs import *
@@ -16,7 +17,13 @@ if __name__ == '__main__':
     num_steps = 20
     useGPU = True
 
+    GSOs = [H.clique_laplacian(), H.line_laplacian()]
+    incidence_matrix = H.incidence_matrix()
     data = hypergraphSources(H, nTrain, nValid, nTest, sourceHyperedges, tMax=num_steps, dataType=torch.float64,
                              device='cuda:0' if (useGPU and torch.cuda.is_available()) else 'cpu')
-    print(data.samples)
-    # plot_diffusion(H, x, num_steps)
+    with open('../Learning/data/sourceLoc/sourceLoc_GSOs.pkl','wb') as f:
+        pickle.dump(GSOs, f)
+    with open('../Learning/data/sourceLoc/sourceLoc_incidence_matrices.pkl', 'wb') as f:
+        pickle.dump(incidence_matrix, f)
+    with open('../Learning/data/sourceLoc/sourceLoc_data.pkl', 'wb') as f:
+        pickle.dump(data, f)

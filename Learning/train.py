@@ -105,10 +105,10 @@ def train_helper(learner_params, train_params, dataset_params, directory):
     # GRAPH #
     #########
 
-    with open(dataset_params['matrix_path'] + '_GSOs.pkl', 'r') as f:
-        GSOs = f.read()
-    with open(dataset_params['matrix_path'] + '_incidence_matrices.pkl', 'r') as f:
-        incidence_matrices = f.read()
+    with open(dataset_params['matrix_path'] + '_GSOs.pkl', 'rb') as f:
+        GSOs = pickle.load(f)
+    with open(dataset_params['matrix_path'] + '_incidence_matrices.pkl', 'rb') as f:
+        incidence_matrices = pickle.load(f)
 
     ########
     # DATA #
@@ -117,8 +117,8 @@ def train_helper(learner_params, train_params, dataset_params, directory):
 
     print('cuda:0' if (torch.cuda.is_available()) else 'cpu')
     print(torch.cuda.device_count())
-    with open(dataset_params['data_path'], 'r') as f:
-        data = f.read()
+    with open(dataset_params['data_path'], 'rb') as f:
+        data = pickle.load(f)
 
     ############
     # TRAINING #
@@ -522,8 +522,8 @@ def run_experiment(args, section_name=''):
     }
 
     dataset_params = {
-        'matrix_path': args.get('matrix_path', 'data/sourceLoc'),
-        'data_path': args.get('data_path', 'data/sourceLoc_data.pkl'),
+        'matrix_path': args.get('matrix_path', 'data/sourceLoc/sourceLoc'),
+        'data_path': args.get('data_path', 'data/sourceLoc/sourceLoc_data.pkl'),
         'normalize_graph_signal': args.getboolean('normalize_graph_signal', False),
         'prop_data_train': args.getfloat('prop_data_train', 0.6),
         'prop_data_valid': args.getfloat('prop_data_valid', 0.2),

@@ -1,5 +1,6 @@
 import jax.numpy as jnp
 from jax import grad, jit
+from itertools import product
 import networkx as nx
 from Simplicial_Complexes import *
 
@@ -53,6 +54,51 @@ class Hypergraph:
             x = np.squeeze(x)
 
         return x
+
+    # Returns the clique expansion graph of the hypergraph
+    def clique_expansion(self):
+        G = nx.Graph()
+        G.add_nodes_from(np.arange(self.N))
+
+        # Go through hyperedges, and add edges between nodes
+        # within the same hyperedge.
+        for hedge in self.hyperedges:
+            for i in range(len(hedge)):
+                for j in range(i+1, len(hedge)):
+                    if G.has_edge(hedge[i], hedge[j]):
+                        G.edges[hedge[i], hedge[j]]['weight'] += 1
+                    else:
+                        G.add_edge(hedge[i], hedge[j], weight=1)
+        return G
+
+    # Returns the Laplacian of the clique expansion of the hypergraph
+    def clique_laplacian(self):
+        return nx.normalized_laplacian_matrix(self.clique_expansion())
+
+    # Returns the line expansion graph of the hypergraph
+    def line_expansion(self):
+        G = nx.Graph()
+        G.add_nodes_from(np.arange(self.M))
+
+        # Go through hyperedges, and add edges between them if they
+        # share nodes, with weight proportional to the size of the
+        # intersection.
+        for i in range(self.M):
+            for j in range(i+1, self.M):
+                G.add_edge(i, j, weight=len(set(self.hyperedges[i]).intersection(self.hyperedges[j])))
+        return G
+
+    # Returns the Laplacian of the line expansion of the hypergraph
+    def line_laplacian(self):
+        return nx.normalized_laplacian_matrix(self.line_expansion())
+
+    # Returns the incidence matrix of the hypergraph
+    def incidence_matrix(self):
+        B = np.zeros((self.N, self.M))
+        for i in range(self.M):
+            B[self.hyperedges[i], i] = 1
+
+        return B
 
     # Computes the Simplicial Complex from the dual of the hypergraph
     def sc_dual(self, x):
