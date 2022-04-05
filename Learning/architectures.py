@@ -64,8 +64,8 @@ class PoolCliqueToLine(nn.Module):
 
         super().__init__()
         self.B = incidenceMatrix
-        self.nInputNodes = self.B[0]
-        self.nOutputNodes = self.B[1]
+        self.nInputNodes = self.B.shape[0]
+        self.nOutputNodes = self.B.shape[1]
 
     def forward(self, x):
         # x should be of shape batchSize x dimNodeSignals x nInputNodes
@@ -92,6 +92,23 @@ class PoolCliqueToLine(nn.Module):
         reprString = "in_dim=%d, out_dim=%d, pooling between GSOs" % (
             self.nInputNodes, self.nOutputNodes)
         return reprString
+
+
+def changeDataTypeAndDevice(X, dataType, device):
+    # Change data type and device as required
+    X = changeDataType(X, dataType)
+    if device is not None:
+        X = X.to(device)
+    return X
+
+
+def getDataTypeAndDevice(X):
+    dataType = X.dtype
+    if 'device' in dir(X):
+        device = X.device
+    else:
+        device = None
+    return dataType, device
 
 
 class LocalGNNCliqueLine(nn.Module):
@@ -223,10 +240,23 @@ class LocalGNNCliqueLine(nn.Module):
         numGSOs = len(GSOs)
         for i in range(numGSOs):
             assert len(dimSignals[i]) == len(nFilterTaps[i]) + 1
+        # Check whether the GSOs have features or not. After that, always handle
+        # it as a matrix of dimension E x N x N.
+        for i in range(numGSOs):
+            GSO = GSOs[i]
+            assert len(GSO.shape) == 2 or len(GSO.shape) == 3
+            if len(GSO.shape) == 2:
+                assert GSO.shape[0] == GSO.shape[1]
+                GSOs[i] = torch.unsqueeze(GSO, axis=0)  # 1 x N x N
+            else:
+                assert GSO.shape[1] == GSO.shape[2]  # E x N x N
+            if i < numGSOs - 1:
+                B = incidence_matrices[i]
+                assert B.ndim == 2 and B.shape[0] == GSO.shape[0]  # N x M
         # nSelectedNodes should be a list of size nFilterTaps, since the number
         # of nodes in the first layer is always the size of the graph
         if nSelectedNodes is None:
-            nSelectedNodes = [[GSOs[i].shape[0] for _ in len(nFilterTaps[i])] for i in range(numGSOs)]
+            nSelectedNodes = [[GSOs[i].shape[1] for _ in range(len(nFilterTaps[i]))] for i in range(numGSOs)]
         else:
             for i in range(numGSOs):
                 assert len(nSelectedNodes[i]) == len(nFilterTaps[i])
@@ -235,18 +265,6 @@ class LocalGNNCliqueLine(nn.Module):
             assert len(poolingSize[i]) == len(nFilterTaps[i])
         # Number of incidence matrices should be 1 less than the number of GSOs
         assert len(incidence_matrices) == numGSOs - 1
-        # Check whether the GSOs have features or not. After that, always handle
-        # it as a matrix of dimension E x N x N.
-        for i in range(numGSOs):
-            GSO = GSOs[i]
-            B = incidence_matrices[i]
-            assert len(GSO.shape) == 2 or len(GSO.shape) == 3
-            if len(GSO.shape) == 2:
-                assert GSO.shape[0] == GSO.shape[1]
-                GSOs[i] = GSO.reshape([1, GSO.shape[0], GSO.shape[1]])  # 1 x N x N
-            else:
-                assert GSO.shape[1] == GSO.shape[2]  # E x N x N
-            assert B.ndims == 2 and B.shape[0] == GSO.shape[0]  # N x M
         # Store the values (using the notation in the paper):
         self.L = [len(nTaps) for nTaps in nFilterTaps]  # Number of graph filtering layers
         self.F = [dims for dims in dimSignals]  # Features
@@ -324,7 +342,7 @@ class LocalGNNCliqueLine(nn.Module):
             # The first layer has to connect whatever was left of the graph
             # filtering stage to create the number of features required by
             # the readout layer
-            fc.append(nn.Linear(self.F[-1], dimReadout[0], bias=self.bias))
+            fc.append(nn.Linear(self.F[-1][-1], dimReadout[0], bias=self.bias))
             # The last linear layer cannot be followed by nonlinearity, because
             # usually, this nonlinearity depends on the loss function (for
             # instance, if we have a classification problem, this nonlinearity
@@ -337,35 +355,41 @@ class LocalGNNCliqueLine(nn.Module):
                 fc.append(nn.Linear(dimReadout[l], dimReadout[l + 1],
                                     bias=self.bias))
         # And we're done
+        fc.append(nn.Sigmoid())
         self.Readout = nn.Sequential(*fc)
         # so we finally have the architecture.
 
-    def changeGSO(self, GSO, nSelectedNodes=[], poolingSize=[]):
+    def changeGSO(self, GSOs, B, nSelectedNodes=[], poolingSize=[]):
 
         # We use this to change the GSO, using the same graph filters.
 
-        # Check that the new GSO has the correct
-        assert len(GSO.shape) == 2 or len(GSO.shape) == 3
-        if len(GSO.shape) == 2:
-            assert GSO.shape[0] == GSO.shape[1]
-            GSO = GSO.reshape([1, GSO.shape[0], GSO.shape[1]])  # 1 x N x N
-        else:
-            assert GSO.shape[1] == GSO.shape[2]  # E x N x N
+        # Check that the new GSO has the correct shape
+        numGSOs = len(GSOs)
+        for i in range(numGSOs):
+            GSO = GSOs[i]
+            assert len(GSO.shape) == 2 or len(GSO.shape) == 3
+            if len(GSO.shape) == 2:
+                assert GSO.shape[0] == GSO.shape[1]
+                GSOs[i] = torch.unsqueeze(GSO, axis=0)  # 1 x N x N
+            else:
+                assert GSO.shape[1] == GSO.shape[2]  # E x N x N
+            if i < numGSOs - 1:
+                B = incidence_matrices[i]
+                assert B.ndim == 2 and B.shape[0] == GSO.shape[0]  # N x M
 
-        # Get dataType and device of the current GSO, so when we replace it, it
-        # is still located in the same type and the same device.
-        dataType = self.S.dtype
-        if 'device' in dir(self.S):
-            device = self.S.device
-        else:
-            device = None
-
-        # Reorder the new GSO
-        self.S, self.order = self.permFunction(GSO)
-        # Change data type and device as required
-        self.S = changeDataType(self.S, dataType)
-        if device is not None:
-            self.S = self.S.to(device)
+        # Loop through all GSOs provided
+        for i in range(numGSOs):
+            # Get dataType and device of the current GSO, so when we replace it, it
+            # is still located in the same type and the same device.
+            dataType, device = getDataTypeAndDevice(self.S[i])
+            # Reorder the new GSO
+            self.S[i], self.order[i] = self.permFunction(GSOs[i])
+            # Change data type and device as required
+            self.S[i] = changeDataTypeAndDevice(self.S[i], dataType, device)
+            if i < numGSOs - 1:
+                dataType, device = getDataTypeAndDevice(self.B[i])
+                self.B[i] = B[i][self.order, :]
+                self.B[i] = changeDataTypeAndDevice(self.B[i], dataType, device)
 
         # Before making decisions, check if there is a new poolingSize list
         if len(poolingSize) > 0:
@@ -388,28 +412,30 @@ class LocalGNNCliqueLine(nn.Module):
             # Then, update the N that we have stored
             self.N = [GSO.shape[1]] + nSelectedNodes
             # And get the new pooling functions
-            for l in range(self.L):
-                # For each layer, add the pooling function
-                self.GFL[3 * l + 2] = self.rho(self.N[l], self.N[l + 1],
-                                               self.alpha[l])
-                self.GFL[3 * l + 2].addGSO(self.S)
-        else:
-            # Just update the GSO
-            for l in range(self.L):
-                self.GFL[3 * l + 2].addGSO(self.S)
+            offset = 0
+            for i in range(numGSOs):
+                for l in range(self.L[i]):
+                    # For each layer, add the pooling function
+                    self.GFL[3 * l + 2] = self.rho(self.N[i][l], self.N[i][l + 1],
+                                                   self.alpha[i][l])
+                offset += 3*self.L[i] + 1
 
-        # And update in the LSIGF that is still missing
-        for l in range(self.L):
-            self.GFL[3 * l].addGSO(self.S)  # Graph convolutional layer
+        # And update the GSOs
+        offset = 0
+        for i in range(numGSOs):
+            for l in range(self.L[i]):
+                self.GFL[3 * l + offset].addGSO(self.S[i])  # Graph convolutional layer
+                self.GFL[3 * l + 2 + offset].addGSO(self.S[i])
+            offset += 3 * self.L[i] + 1
 
     def splitForward(self, x):
 
         # Now we compute the forward call
-        assert len(x.shape) == 3
-        assert x.shape[1] == self.F[0]
-        assert x.shape[2] == self.N[0]
+        assert x.ndim == 3
+        assert x.shape[1] == self.F[0][0]
+        assert x.shape[2] == self.N[0][0]
         # Reorder
-        x = x[:, :, self.order]  # B x F x N
+        x = x[:, :, self.order[0]]  # B x F x N
         # Let's call the graph filtering layer
         yGFL = self.GFL(x)
         # Change the order, for the readout
@@ -424,13 +450,14 @@ class LocalGNNCliqueLine(nn.Module):
 
         # Most of the times, we just need the actual, last output. But, since in
         # this case, we also want to compare with the output of the GNN itself,
-        # we need to create this other forward funciton that takes both outputs
+        # we need to create this other forward function that takes both outputs
         # (the GNN and the MLP) and returns only the MLP output in the proper
         # forward function.
         output, _ = self.splitForward(x)
 
         return output
 
+    # TODO: This is NOT updated and should not be used!!!
     def singleNodeForward(self, x, nodes):
 
         # x is of shape B x F[0] x N[-1]
@@ -493,8 +520,11 @@ class LocalGNNCliqueLine(nn.Module):
         # Call the parent .to() method (to move the registered parameters)
         super().to(device)
         # Move the GSO
-        self.S = self.S.to(device)
-        # And all the other variables derived from it.
-        for l in range(self.L):
-            self.GFL[3 * l].addGSO(self.S)
-            self.GFL[3 * l + 2].addGSO(self.S)
+        offset = 0
+        for i in range(len(self.S)):
+            self.S[i] = self.S[i].to(device)
+            # And all the other variables derived from it.
+            for l in range(self.L[i]):
+                self.GFL[3 * l + offset].addGSO(self.S[i])
+                self.GFL[3 * l + 2 + offset].addGSO(self.S[i])
+            offset += 3 * self.L[i] + 1

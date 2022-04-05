@@ -13,7 +13,7 @@ import argparse
 parser = argparse.ArgumentParser(description="Training GNN Models")
 parser.add_argument('-p', '--path', dest='path', type=str)
 parser.add_argument('-s', '--saveModel', dest='saveModel', action='store_true')
-parser.set_defaults(saveModel=False, path='cfg/aggregationGNN.cfg')
+parser.set_defaults(saveModel=False, path='cfg/localGNNCLiqueLine.cfg')
 cmd_args = parser.parse_args()
 
 import numpy as np
@@ -43,9 +43,8 @@ import ast
 from mlxtend.plotting import plot_confusion_matrix
 import sys
 
-sys.path.append('gnn_library')
-
 # \\\ Alelab libraries:
+sys.path.insert(1, os.path.abspath('../graph-neural-networks'))
 import alegnn.utils.graphML as gml
 import alegnn.modules.model as model
 
@@ -56,12 +55,16 @@ from alegnn.utils.miscTools import saveSeed
 # Start measuring time
 startRunTime = datetime.datetime.now()
 
-from gnn_data.dataTools import dataMisinformation
+# from gnn_data.dataTools import dataMisinformation
+sys.path.insert(1, os.path.abspath('../Synthetic_Data_Generation'))
+from Source_Localization import hypergraphSources
 from architectures import LocalGNNCliqueLine
 # from learner.aggregationGNN import AggregationGNN_DB
 # from learner.subgraphAggregationGNN import SubgraphAggregationGNN
-from learner.trainerMisinformation import TrainerMisinformation
-import learner.evaluatorMisinformation as EvaluateMisinformation
+# from learner.trainerMisinformation import TrainerMisinformation
+# import learner.evaluatorMisinformation as EvaluateMisinformation
+from alegnn.modules.training import Trainer
+from alegnn.modules.evaluation import evaluate
 
 possible_gnn_models = ['LocalGNNCliqueLine']
 figSize = 7  # Overall size of the figure that contains the plot
@@ -119,6 +122,14 @@ def train_helper(learner_params, train_params, dataset_params, directory):
     print(torch.cuda.device_count())
     with open(dataset_params['data_path'], 'rb') as f:
         data = pickle.load(f)
+    if useGPU and torch.cuda.is_available():
+        GSOs = [torch.tensor(X.todense(), device='cuda:0') for X in GSOs]
+        incidence_matrices = [torch.tensor(X, device='cuda:0') for X in incidence_matrices]
+        data.to('cuda:0')
+    else:
+        GSOs = [torch.tensor(X.todense(), device='cpu') for X in GSOs]
+        incidence_matrices = [torch.tensor(X, device='cpu') for X in incidence_matrices]
+        data.to('cpu')
 
     ############
     # TRAINING #
@@ -147,20 +158,21 @@ def train_helper(learner_params, train_params, dataset_params, directory):
     else:
         raise ValueError('pooling function in cfg not available')
 
-    trainer = TrainerMisinformation
-    evaluator = EvaluateMisinformation.evaluateMisinformation
+    trainer = Trainer
+    evaluator = evaluate
 
     assert learner_params['gnn_model'] in possible_gnn_models, (
-            'selected GNN model not in ' + str(possible_gnn_models))
+            'selected GNN model ' + learner_params['gnn_model'] + ' not in ' + str(possible_gnn_models))
 
     if learner_params['gnn_model'] == 'LocalGNNCliqueLine':
-        # \\\ Basic parameters for the Selection GNN architecture
+        # \\\ Basic parameters for the Local GNN architecture, with clique expansion
+        # and line expansion components
 
         hParamsLocGNN = {'name': 'LocGNN_CL',
                          'archit': LocalGNNCliqueLine,
                          'device': 'cuda:0' if (useGPU and torch.cuda.is_available()) else 'cpu',
                          'dimSignals': learner_params['dim_features'],
-                         'nFilterTaps': learner_params['n_filter_taps'],
+                         'nFilterTaps': learner_params['num_filter_taps'],
                          'bias': learner_params['bias'],
                          'nonlinearity': nonlinearity,
                          'nSelectedNodes': None,
@@ -369,7 +381,7 @@ def create_plots(save_dir, trainVars, testVars):
     xTrain = np.arange(0, trainVars['nEpochs'] * trainVars['nBatches'], xAxisMultiplierTrain)
     xValid = np.arange(0, trainVars['nEpochs'] * trainVars['nBatches'], \
                        trainVars['validationInterval'] * xAxisMultiplierValid)
-    xValid = np.append(xValid, xTrain[-1])
+    # xValid = np.append(xValid, xTrain[-1])
     xValidEpochs = np.arange(0, trainVars['nEpochs'], \
                              trainVars['validationInterval'] * xAxisMultiplierValid)
 
@@ -409,9 +421,9 @@ def create_plots(save_dir, trainVars, testVars):
     sub2.plot(xEpochs, lossEpochTrainPlot,
               color='#01256E', linewidth=lineWidth,
               marker=markerShape, markersize=markerSize)
-    sub2.plot(xValidEpochs, lossValidPlot,
-              color='#A1CAF1', linewidth=lineWidth,
-              marker=markerShape, markersize=markerSize)
+    # sub2.plot(xValidEpochs, lossValidPlot,
+    #          color='#A1CAF1', linewidth=lineWidth,
+    #          marker=markerShape, markersize=markerSize)
     sub2.plot([0, xEpochs[-1]], 2 * [testVars['costBest']],
               color='#9E5B2D', linewidth=lineWidth,
               linestyle='-.',
@@ -425,6 +437,7 @@ def create_plots(save_dir, trainVars, testVars):
     sub2.legend([r'Training', r'Validation', r'Eval Best Model', r'Eval Last Model'])
     sub2.set_title(r'Loss vs. Epochs')
 
+    '''
     misclassTrainPlot = trainVars['misclassTrain'][xTrain]
     misclassValidPlot = trainVars['misclassValid'][selectSamplesValid]
     sub3.plot(xTrain, misclassTrainPlot,
@@ -484,6 +497,7 @@ def create_plots(save_dir, trainVars, testVars):
     sub6.set_xlabel(r'Predicted Label')
     sub6.set_ylabel(r'True Label')
     sub6.set_title(r'Confusion Matrix - Last Model')
+    '''
 
     fig.savefig(os.path.join(save_dir, 'figs.png'), dpi=200)
 
@@ -505,7 +519,7 @@ def run_experiment(args, section_name=''):
     }
 
     learner_params = {
-        'gnn_model': args.get('gnn_model', 'aggregationGNN'),
+        'gnn_model': args.get('gnn_model', 'LocalGNNCliqueLine'),
         'dim_features': ast.literal_eval(args.get('dim_features', '[1]')),
         'num_filter_taps': ast.literal_eval(args.get('num_filter_taps', '[]')),
         'bias': args.getboolean('bias', False),
@@ -533,7 +547,7 @@ def run_experiment(args, section_name=''):
     }
 
     today = datetime.datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
-    directory = Path('models/' + args.get('name') + '/' + today + section_name)
+    directory = Path('models/' + args.get('name', 'localGNNCliqueLine') + '/' + today + section_name)
 
     trainVars, testVars = train_helper(
         learner_params=learner_params,
@@ -560,3 +574,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+    

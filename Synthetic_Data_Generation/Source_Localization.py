@@ -1,5 +1,7 @@
 import numpy as np
+import torch
 from alegnn.utils.dataTools import _dataForClassification
+from sklearn.metrics import f1_score
 
 
 def generate_hypergraph_diffusion(sc, n_samples, n_sources, source_upper, timesteps):
@@ -106,9 +108,9 @@ class hypergraphSources(_dataForClassification):
     errorRate = .evaluate(yHat, y, tol = 1e-9)
         Input:
             yHat (dtype.array): unnormalized probability of each label (shape:
-                nDataPoints x nClasses)
-            y (dtype.array): correct labels (1-D binary vector, shape:
-                nDataPoints)
+                nDataPoints x nHyperedges)
+            y (dtype.array): correct labels (2-D binary vector, shape:
+                nDataPoints x nHyperedges)
             tol (float, default = 1e-9): numerical tolerance to consider two
                 numbers to be equal
         Output:
@@ -156,16 +158,41 @@ class hypergraphSources(_dataForClassification):
             labels_dict[hedge_ind] = hedge_source_vector
 
         # Now, we have the signals and the labels
-        signals = np.array([signals_dict[sampledSources[i]][sampledTimes[i], :] for i in range(nTotal)])  # nTotal x N
-        labels = np.array([labels_dict[sampledSources[i]] for i in range(nTotal)])
+        signals = np.expand_dims(np.array([signals_dict[sampledSources[i]][sampledTimes[i], :]
+                                           for i in range(nTotal)]), axis=1)  # nTotal x N
+        labels = torch.LongTensor([labels_dict[sampledSources[i]] for i in range(nTotal)])
 
         # Split and save them
-        self.samples['train']['signals'] = signals[0:nTrain, :]
+        self.samples['train']['signals'] = signals[0:nTrain, :, :]
         self.samples['train']['targets'] = labels[0:nTrain, :]
-        self.samples['valid']['signals'] = signals[nTrain:nTrain + nValid, :]
+        self.samples['valid']['signals'] = signals[nTrain:nTrain + nValid, :, :]
         self.samples['valid']['targets'] = labels[nTrain:nTrain + nValid, :]
-        self.samples['test']['signals'] = signals[nTrain + nValid:nTotal, :]
+        self.samples['test']['signals'] = signals[nTrain + nValid:nTotal, :, :]
         self.samples['test']['targets'] = labels[nTrain + nValid:nTotal, :]
         # Change data to specified type and device
         self.astype(self.dataType)
         self.to(self.device)
+
+    def evaluate(self, yHat, y, tol=1e-9):
+        """
+        Return the accuracy (ratio of yHat = y)
+        """
+        # N = y.shape[0]
+        if 'torch' in repr(self.dataType):
+            #   We compute the target label (hardmax)
+            # yHat = torch.argmax(yHat, dim=1)
+            #   And compute the error
+            # totalErrors = torch.sum(torch.abs(yHat - y) > tol)
+            # errorRate = totalErrors.type(self.dataType) / N
+            errorRate = f1_score(y, yHat, average='macro')
+        else:
+            yHat = np.array(yHat)
+            y = np.array(y)
+            #   We compute the target label (hardmax)
+            # yHat = np.argmax(yHat, axis=1)
+            #   And compute the error
+            # totalErrors = np.sum(np.abs(yHat - y) > tol)
+            # errorRate = totalErrors.astype(self.dataType) / N
+            errorRate = f1_score(y, yHat, average='macro')
+        #   And from that, compute the accuracy
+        return errorRate

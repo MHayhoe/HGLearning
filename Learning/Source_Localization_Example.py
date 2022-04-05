@@ -124,8 +124,8 @@ nValid = int(0.025 * nTrain)  # Number of validation samples
 nTest = 200  # Number of testing samples
 tMax = 25  # Maximum number of diffusion times (A^t for t < tMax)
 
-nDataRealizations = 10  # Number of data realizations
-nGraphRealizations = 3  # Number of graph realizations
+nDataRealizations = 3  # Number of data realizations
+nGraphRealizations = 1  # Number of graph realizations
 nClasses = 5  # Number of source nodes to select
 
 nNodes = 100  # Number of nodes
@@ -203,13 +203,13 @@ writeVarValues(varsFile,
 
 # Select pooling options (node ordering for zero-padding)
 doDegree = True
-doSpectralProxies = True
+doSpectralProxies = False
 doEDS = False
 doCoarsening = False
 
 # Select desired architectures
 doSelectionGNN = True
-doAggregationGNN = True
+doAggregationGNN = False
 
 # In this section, we determine the (hyper)parameters of models that we are
 # going to train. This only sets the parameters. The architectures need to be
