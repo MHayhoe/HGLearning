@@ -1,8 +1,16 @@
 import jax.numpy as jnp
+import numpy as np
 from jax import grad, jit
-from itertools import product
 import networkx as nx
-from Simplicial_Complexes import *
+from Simplicial_Complexes import SimplicialComplex
+from tqdm import tqdm
+
+
+# Computes a maximal hypergraph from the simplicial complex. In other words, takes all nodes from the SC,
+# and adds hyperedges corresponding to the largest-order simplices in the SC (ignoring lower-order faces).
+def from_SC(S : SimplicialComplex):
+    return Hypergraph(S.simplices)
+
 
 class Hypergraph:
     def __init__(self, hyperedges=[], signals=None):
@@ -43,7 +51,7 @@ class Hypergraph:
             assert x0.shape[0] == self.N
             x[0, :] = x0
 
-        for t in range(k):
+        for t in tqdm(range(k)):
             x[t+1, :] = x[t, :] - self.laplacian(x[t, :])
 
         # Remove the initial signal

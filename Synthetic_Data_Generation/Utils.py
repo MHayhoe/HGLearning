@@ -33,6 +33,15 @@ def plot_diffusion(H, x, num_steps=1):
     plt.show()
 
 
+# Plot a hypergraph in 2 dimensions
+def plot_2d_hg(H):
+    H_draw = hnx.Hypergraph(H.hyperedges)
+    kwargs = {'layout_kwargs': {'seed': 40}, 'with_node_counts': False}
+    hnx.drawing.draw(H_draw, **kwargs)
+    plt.show()
+
+
+# Plot a simplicial complex in 2 dimensions
 def plot_2d_sc(sc):
     fig, ax = plt.subplots()
     points = sc.pts[:,:2]

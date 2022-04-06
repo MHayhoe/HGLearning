@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from alegnn.utils.dataTools import _dataForClassification
 from sklearn.metrics import f1_score
+from tqdm import tqdm
 
 
 def generate_hypergraph_diffusion(sc, n_samples, n_sources, source_upper, timesteps):
@@ -160,7 +161,7 @@ class hypergraphSources(_dataForClassification):
         # Now, we have the signals and the labels
         signals = np.expand_dims(np.array([signals_dict[sampledSources[i]][sampledTimes[i], :]
                                            for i in range(nTotal)]), axis=1)  # nTotal x N
-        labels = torch.LongTensor([labels_dict[sampledSources[i]] for i in range(nTotal)])
+        labels = torch.unsqueeze(torch.DoubleTensor([labels_dict[sampledSources[i]] for i in range(nTotal)]), dim=2)
 
         # Split and save them
         self.samples['train']['signals'] = signals[0:nTrain, :, :]
@@ -184,9 +185,13 @@ class hypergraphSources(_dataForClassification):
             #   And compute the error
             # totalErrors = torch.sum(torch.abs(yHat - y) > tol)
             # errorRate = totalErrors.type(self.dataType) / N
+            # Take the labels from the GPU to the CPU for computing the evaluation metric, and make sure not to maintain
+            # any unneeded gradients
+            yHat = np.squeeze(yHat.detach().cpu().numpy() > 0.5)
+            y = np.squeeze(y.detach().cpu().numpy().astype(bool))
             errorRate = f1_score(y, yHat, average='macro')
         else:
-            yHat = np.array(yHat)
+            yHat = np.array(yHat > 0.5)
             y = np.array(y)
             #   We compute the target label (hardmax)
             # yHat = np.argmax(yHat, axis=1)

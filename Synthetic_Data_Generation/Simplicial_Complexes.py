@@ -122,6 +122,7 @@ class SimplicialComplex:
             diffused_signal.append(matrix_power(self.hodge_laps[i], k) @ signal)
         return diffused_signal
 
+
 # Class built on Simplicial Complex base class to build a Cech Complex
 class CechComplex(SimplicialComplex):
     def __init__(self, points, epsilon, labels=None, distfcn=distance.euclidean, lcc=False):

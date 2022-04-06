@@ -355,7 +355,6 @@ class LocalGNNCliqueLine(nn.Module):
                 fc.append(nn.Linear(dimReadout[l], dimReadout[l + 1],
                                     bias=self.bias))
         # And we're done
-        fc.append(nn.Sigmoid())
         self.Readout = nn.Sequential(*fc)
         # so we finally have the architecture.
 
@@ -443,7 +442,8 @@ class LocalGNNCliqueLine(nn.Module):
         # And, feed it into the Readout layer
         y = self.Readout(y)  # B x N[-1] x dimReadout[-1]
         # Reshape and return
-        return y.permute(0, 2, 1), yGFL
+        # return y.permute(0, 2, 1), yGFL
+        return y, yGFL
         # B x dimReadout[-1] x N[-1], B x dimFeatures[-1] x N[-1]
 
     def forward(self, x):
