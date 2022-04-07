@@ -19,6 +19,7 @@ class Hypergraph:
         self.hyperedges = list(map(lambda hedge: sorted([self.map_node(v) for v in hedge]), hyperedges))
         self.M = len(self.hyperedges)
         self.laplacian = self.laplacian_operator()
+        self.B = self.incidence_matrix()
 
     # Maps nodes. If it's been seen before, this assigns the old value, otherwise increments node count.
     # node_map is the same as a defaultdict object, but faster with large datasets.
@@ -36,9 +37,15 @@ class Hypergraph:
             energy += jnp.max((x[hedge, jnp.newaxis] - x[hedge])**2) / hedge.size
         return energy
 
+    def energy_fn_matrix(self, x):
+        E = self.B.T * x
+        E = (E[:, :, np.newaxis] - E[:, np.newaxis, :])**2
+        hedge_sizes = jnp.array([len(hedge) for hedge in self.hyperedges])
+        return jnp.sum(jnp.max(jnp.max(E, axis=2), axis=1) / hedge_sizes)
+
     # Returns the Laplacian operator, i.e., half the gradient of the energy
     def laplacian_operator(self):
-        return lambda x: 1/2*jit(grad(self.energy_fn))(x)
+        return lambda x: 1/2*jit(grad(self.energy_fn_matrix))(x)
 
     # Checks the shape of signals to see if they match hypergraph cardinality
     def check_shape_signals(self, x):

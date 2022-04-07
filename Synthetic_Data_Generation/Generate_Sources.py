@@ -10,20 +10,21 @@ import tadasets
 
 if __name__ == '__main__':
     # First, we generate a Cech Complex by sampling points from a torus
-    n_points = 100  # number of datapoints
-    epsilon = 1.2  # max distance between datapoints to draw a simplex between
+    n_points = 1000  # number of datapoints
+    epsilon = 0.4  # max distance between datapoints to draw a simplex between
     noise = 0  # noise to add during drawing of samples
 
     # Draws datapoints from a torus
     points = tadasets.torus(n_points, c=2, a=1, noise=noise)
     # Builds a Cech Complex (saving only the largest connected component)
-    SC = CechComplex(points, epsilon, lcc = True)
+    SC = CechComplex(points, epsilon, lcc=True)
 
     # Plots SC in new window
-    # plot_2d_sc(SC)
+    plot_2d_sc(SC)
 
     # Create a hypergraph from the Cech complex
     H = from_SC(SC)
+    print(H.M)
 
     # Plots hypergraph in new window
     # plot_2d_hg(H)
@@ -32,8 +33,8 @@ if __name__ == '__main__':
     nTrain = 500
     nValid = 300
     nTest = 200
-    # Only treat the first 10% of hyperedges as possible sources
-    sourceHyperedges = np.arange(np.round(H.M / 10)).astype(np.int8)
+    # Treat all hyperedges as possible sources
+    sourceHyperedges = np.arange(H.M).astype(np.int8)
     num_steps = 10
     useGPU = True
 

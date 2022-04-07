@@ -358,7 +358,7 @@ class LocalGNNCliqueLine(nn.Module):
         self.Readout = nn.Sequential(*fc)
         # so we finally have the architecture.
 
-    def changeGSO(self, GSOs, B, nSelectedNodes=[], poolingSize=[]):
+    def changeGSO(self, GSOs, Bs, nSelectedNodes=[], poolingSize=[]):
 
         # We use this to change the GSO, using the same graph filters.
 
@@ -373,7 +373,7 @@ class LocalGNNCliqueLine(nn.Module):
             else:
                 assert GSO.shape[1] == GSO.shape[2]  # E x N x N
             if i < numGSOs - 1:
-                B = incidence_matrices[i]
+                B = Bs[i]
                 assert B.ndim == 2 and B.shape[0] == GSO.shape[0]  # N x M
 
         # Loop through all GSOs provided
