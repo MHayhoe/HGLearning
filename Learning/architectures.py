@@ -167,6 +167,9 @@ class LocalGNNCliqueLine(nn.Module):
             incidence_matrices (np.array): maps nodes from the current graph to the next.
                 In the case of the clique expansion to line expansion, this is the
                 incidence matrix of the original hypergraph.
+            sourceEdges (np.array): hyperedges corresponding to sources. If this is
+                provided, it will be used to select only those outputs corresponding
+                to the source hyperedges when calling self.forward()
             order (string or None, default = None): determine the criteria to
                 use when reordering the nodes (i.e. for pooling reasons); the
                 string has to be such that there is a function named
@@ -233,7 +236,7 @@ class LocalGNNCliqueLine(nn.Module):
                  # MLP in the end
                  dimReadout,
                  # Structure
-                 GSOs, incidence_matrices, order=None):
+                 GSOs, incidence_matrices, sourceEdges=None, order=None):
         # Initialize parent:
         super().__init__()
         # dimSignals should be a list and of size 1 more than nFilter taps.
@@ -308,6 +311,7 @@ class LocalGNNCliqueLine(nn.Module):
         self.sigma = nonlinearity
         self.rho = poolingFunction
         self.dimReadout = dimReadout
+        self.sourceEdges = sourceEdges
         # And now, we're finally ready to create the architecture:
         # \\\ Graph filtering layers \\\
         # OBS.: We could join this for with the one before, but we keep separate
@@ -443,7 +447,10 @@ class LocalGNNCliqueLine(nn.Module):
         y = self.Readout(y)  # B x N[-1] x dimReadout[-1]
         # Reshape and return
         # return y.permute(0, 2, 1), yGFL
-        return y, yGFL
+        if self.sourceEdges is not None:
+            return y[:, self.sourceEdges, :], yGFL
+        else:
+            return y, yGFL
         # B x dimReadout[-1] x N[-1], B x dimFeatures[-1] x N[-1]
 
     def forward(self, x):

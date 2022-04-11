@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from alegnn.utils.dataTools import _dataForClassification
 from sklearn.metrics import f1_score
+from scipy.special import softmax
 from tqdm import tqdm
 
 
@@ -129,6 +130,7 @@ class hypergraphSources(_dataForClassification):
         self.nTrain = nTrain
         self.nValid = nValid
         self.nTest = nTest
+        self.sourceEdges = sourceEdges
         # If no tMax is specified, set it the maximum possible.
         if tMax is None:
             tMax = H.N
@@ -138,7 +140,7 @@ class hypergraphSources(_dataForClassification):
         # sample source nodes
         sampledSources = np.random.choice(sourceEdges, size=nTotal)
         # sample diffusion times
-        sampledTimes = np.random.choice(tMax, size=nTotal)
+        sampledTimes = np.random.choice(np.arange(1, tMax), size=nTotal)
 
         # Construct the samples for each sampled source hyperedge. In each case,
         # we set the signal values of all nodes in the chosen hyperedge to 1,
@@ -153,23 +155,25 @@ class hypergraphSources(_dataForClassification):
             # Diffuse the node signal for tMax steps
             signals_dict[hedge_ind] = H.diffuse(x0, tMax)
 
-            # Build an indicator vector as a label for this hyperedge
-            hedge_source_vector = np.zeros(H.M)
-            hedge_source_vector[hedge_ind] = 1
-            labels_dict[hedge_ind] = hedge_source_vector
+        # Relabel sources as 0,...,k-1
+        relabeledSources = {}
+        count = 0
+        for source_ind in sourceEdges:
+            relabeledSources[source_ind] = count
+            count += 1
 
         # Now, we have the signals and the labels
         signals = np.expand_dims(np.array([signals_dict[sampledSources[i]][sampledTimes[i], :]
                                            for i in range(nTotal)]), axis=1)  # nTotal x N
-        labels = torch.unsqueeze(torch.DoubleTensor([labels_dict[sampledSources[i]] for i in range(nTotal)]), dim=2)
+        labels = torch.unsqueeze(torch.DoubleTensor([relabeledSources[sampledSources[i]] for i in range(nTotal)]), dim=1) # nTotal x 1
 
         # Split and save them
         self.samples['train']['signals'] = signals[0:nTrain, :, :]
-        self.samples['train']['targets'] = labels[0:nTrain, :]
+        self.samples['train']['targets'] = labels[0:nTrain]
         self.samples['valid']['signals'] = signals[nTrain:nTrain + nValid, :, :]
-        self.samples['valid']['targets'] = labels[nTrain:nTrain + nValid, :]
+        self.samples['valid']['targets'] = labels[nTrain:nTrain + nValid]
         self.samples['test']['signals'] = signals[nTrain + nValid:nTotal, :, :]
-        self.samples['test']['targets'] = labels[nTrain + nValid:nTotal, :]
+        self.samples['test']['targets'] = labels[nTrain + nValid:nTotal]
         # Change data to specified type and device
         self.astype(self.dataType)
         self.to(self.device)
@@ -187,17 +191,18 @@ class hypergraphSources(_dataForClassification):
             # errorRate = totalErrors.type(self.dataType) / N
             # Take the labels from the GPU to the CPU for computing the evaluation metric, and make sure not to maintain
             # any unneeded gradients
-            yHat = np.squeeze(yHat.detach().cpu().numpy() > 0.5)
-            y = np.squeeze(y.detach().cpu().numpy().astype(bool))
-            errorRate = f1_score(y, yHat, average='macro')
+            yHat = np.argmax(np.squeeze(yHat.detach().cpu().numpy()), axis=1)
+            y = np.squeeze(y.detach().cpu().numpy())
+            # Compute the F1 score for all classes at once (not treating classes differently)
+            errorRate = f1_score(y, yHat, average='micro')
         else:
-            yHat = np.array(yHat > 0.5)
+            yHat = np.argmax(yHat, axis=1)
             y = np.array(y)
             #   We compute the target label (hardmax)
             # yHat = np.argmax(yHat, axis=1)
             #   And compute the error
             # totalErrors = np.sum(np.abs(yHat - y) > tol)
             # errorRate = totalErrors.astype(self.dataType) / N
-            errorRate = f1_score(y, yHat, average='macro')
+            errorRate = f1_score(y, yHat, average='micro')
         #   And from that, compute the accuracy
         return errorRate

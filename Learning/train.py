@@ -137,8 +137,16 @@ def train_helper(learner_params, train_params, dataset_params, directory):
 
     if train_params['loss_function'] == 'MSE':
         loss_function = nn.MSELoss()
+        # Ensure correct datatypes
+        data.samples['train']['targets'] = data.samples['train']['targets'].type(torch.DoubleTensor)
+        data.samples['valid']['targets'] = data.samples['valid']['targets'].type(torch.DoubleTensor)
+        data.samples['test']['targets'] = data.samples['test']['targets'].type(torch.DoubleTensor)
     elif train_params['loss_function'] == 'CE':
         loss_function = nn.CrossEntropyLoss()
+        # Ensure correct datatypes
+        data.samples['train']['targets'] = data.samples['train']['targets'].type(torch.LongTensor)
+        data.samples['valid']['targets'] = data.samples['valid']['targets'].type(torch.LongTensor)
+        data.samples['test']['targets'] = data.samples['test']['targets'].type(torch.LongTensor)
     else:
         raise ValueError('loss function in cfg not available')
 
@@ -180,7 +188,8 @@ def train_helper(learner_params, train_params, dataset_params, directory):
                          'poolingSize': learner_params['pooling_size'],
                          'dimReadout': learner_params['dim_readout'],
                          'GSOs': GSOs,
-                         'incidence_matrices': incidence_matrices}  # Hyperparameters for the SelectionGNN (selGNN)
+                         'incidence_matrices': incidence_matrices,
+                         'sourceEdges': data.sourceEdges}  # Hyperparameters for the SelectionGNN (selGNN)
 
         # Chosen architecture
 
@@ -341,11 +350,13 @@ def train_helper(learner_params, train_params, dataset_params, directory):
     if train_params['lr_decay']:
         thisTrainVars = modelsGNN[thisName].train(data, train_params['n_epochs'], train_params['batch_size'],
                                                   validationInterval=train_params['validation_interval'],
+                                                  printInterval=train_params['print_interval'],
                                                   learningRateDecayRate=train_params['lr_decay_rate'],
                                                   learningRateDecayPeriod=train_params['lr_decay_period'])
     else:
         thisTrainVars = modelsGNN[thisName].train(data, train_params['n_epochs'], train_params['batch_size'],
-                                                  validationInterval=train_params['validation_interval'])
+                                                  validationInterval=train_params['validation_interval'],
+                                                  printInterval=train_params['print_interval'])
 
     ###########
     # TESTING #
@@ -391,51 +402,89 @@ def create_plots(save_dir, trainVars, testVars):
     selectSamplesValid = np.arange(0, len(trainVars['lossValid']), xAxisMultiplierValid)
     lossValidPlot = trainVars['lossValid'][selectSamplesValid]
     plt.subplots_adjust(wspace=0.35, hspace=0.25)
-    sub1 = fig.add_subplot(3, 4, (1, 2))
-    sub2 = fig.add_subplot(3, 4, (3, 4))
-    sub3 = fig.add_subplot(3, 4, (5, 6))
-    sub4 = fig.add_subplot(3, 4, (7, 8))
-    sub5 = fig.add_subplot(3, 4, 9)
-    sub6 = fig.add_subplot(3, 4, 10)
+    sub1 = fig.add_subplot(2, 4, (1, 2))
+    sub2 = fig.add_subplot(2, 4, (3, 4))
+    sub3 = fig.add_subplot(2, 4, (5, 6))
+    sub4 = fig.add_subplot(2, 4, (7, 8))
+    # sub5 = fig.add_subplot(3, 4, 9)
+    # sub6 = fig.add_subplot(3, 4, 10)
 
+    ##########################
+    # Loss vs Training Steps #
+    ##########################
     sub1.plot(xTrain, lossTrainPlot,
               color='#01256E', linewidth=lineWidth,
               marker=markerShape, markersize=markerSize)
     sub1.plot(xValid, lossValidPlot,
               color='#A1CAF1', linewidth=lineWidth,
               marker=markerShape, markersize=markerSize)
-    sub1.plot([0, xTrain[-1]], 2 * [testVars['costBest']],
-              color='#9E5B2D', linewidth=lineWidth,
-              linestyle='-.',
-              marker=markerShape, markersize=markerSize)
-    sub1.plot([0, xTrain[-1]], 2 * [testVars['costLast']],
-              color='#464646', linewidth=lineWidth,
-              linestyle='-.',
-              marker=markerShape, markersize=markerSize)
     sub1.set_ylabel(r'Loss')
     sub1.set_xlabel(r'Training Steps')
-    sub1.legend([r'Training', r'Validation', r'Eval Best Model', r'Eval Last Model'])
+    sub1.legend([r'Training', r'Validation'])
     sub1.set_title(r'Loss vs. Training Steps')
 
+    ##################
+    # Loss vs Epochs #
+    ##################
     lossEpochTrainPlot = np.mean(trainVars['lossTrain'].reshape(trainVars['nEpochs'], trainVars['nBatches']), axis=1)
     sub2.plot(xEpochs, lossEpochTrainPlot,
               color='#01256E', linewidth=lineWidth,
               marker=markerShape, markersize=markerSize)
-    # sub2.plot(xValidEpochs, lossValidPlot,
-    #          color='#A1CAF1', linewidth=lineWidth,
-    #          marker=markerShape, markersize=markerSize)
-    sub2.plot([0, xEpochs[-1]], 2 * [testVars['costBest']],
-              color='#9E5B2D', linewidth=lineWidth,
-              linestyle='-.',
-              marker=markerShape, markersize=markerSize)
-    sub2.plot([0, xEpochs[-1]], 2 * [testVars['costLast']],
-              color='#464646', linewidth=lineWidth,
-              linestyle='-.',
+    sub2.plot(xEpochs, lossValidPlot,
+              color='#A1CAF1', linewidth=lineWidth,
               marker=markerShape, markersize=markerSize)
     sub2.set_ylabel(r'Loss')
     sub2.set_xlabel(r'Epochs')
-    sub2.legend([r'Training', r'Validation', r'Eval Best Model', r'Eval Last Model'])
+    sub2.legend([r'Training', r'Validation'])
     sub2.set_title(r'Loss vs. Epochs')
+
+    ##########################
+    # Eval vs Training Steps #
+    ##########################
+    costTrainPlot = trainVars['costTrain'][xTrain]
+    costValidPlot = trainVars['costValid'][selectSamplesValid]
+    sub3.plot(xTrain, costTrainPlot,
+              color='#01256E', linewidth=lineWidth,
+              marker=markerShape, markersize=markerSize)
+    sub3.plot(xValid, costValidPlot,
+              color='#A1CAF1', linewidth=lineWidth,
+              marker=markerShape, markersize=markerSize)
+    sub3.plot([0, xTrain[-1]], 2 * [testVars['costBest']],
+              color='#9E5B2D', linewidth=lineWidth,
+              linestyle='-.',
+              marker=markerShape, markersize=markerSize)
+    sub3.plot([0, xTrain[-1]], 2 * [testVars['costLast']],
+              color='#464646', linewidth=lineWidth,
+              linestyle='-.',
+              marker=markerShape, markersize=markerSize)
+    sub3.set_ylabel(r'Micro-F1')
+    sub3.set_xlabel(r'Training Steps')
+    sub3.legend([r'Training', r'Validation', r'Eval Best Model', r'Eval Last Model'])
+    sub3.set_title(r'Micro-F1 vs. Training Steps')
+
+    ##################
+    # Eval vs Epochs #
+    ##################
+    costEpochTrainPlot = np.mean(trainVars['costTrain'].reshape(trainVars['nEpochs'], trainVars['nBatches']), axis=1)
+    sub4.plot(xEpochs, costEpochTrainPlot,
+              color='#01256E', linewidth=lineWidth,
+              marker=markerShape, markersize=markerSize)
+    sub4.plot(xEpochs, costValidPlot,
+              color='#A1CAF1', linewidth=lineWidth,
+              marker=markerShape, markersize=markerSize)
+    sub4.plot([0, xEpochs[-1]], 2 * [testVars['costBest']],
+              color='#9E5B2D', linewidth=lineWidth,
+              linestyle='-.',
+              marker=markerShape, markersize=markerSize)
+    sub4.plot([0, xEpochs[-1]], 2 * [testVars['costLast']],
+              color='#464646', linewidth=lineWidth,
+              linestyle='-.',
+              marker=markerShape, markersize=markerSize)
+    sub4.set_ylabel(r'Micro-F1')
+    sub4.set_xlabel(r'Epochs')
+    sub4.legend([r'Training', r'Validation', r'Eval Best Model', r'Eval Last Model'])
+    sub4.set_title(r'Micro-F1 vs. Epochs')
+
 
     '''
     misclassTrainPlot = trainVars['misclassTrain'][xTrain]
@@ -515,7 +564,8 @@ def run_experiment(args, section_name=''):
         'lr_decay': args.getboolean('lr_decay', False),
         'lr_decay_rate': args.getfloat('lr_decay_rate', 0.9),
         'lr_decay_period': args.getint('lr_decay_period', 1),
-        'validation_interval': args.getint('validation_interval', 5)
+        'validation_interval': args.getint('validation_interval', 5),
+        'print_interval': args.getint('print_interval', 5)
     }
 
     learner_params = {
