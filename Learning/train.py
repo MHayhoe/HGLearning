@@ -63,8 +63,7 @@ from architectures import LocalGNNCliqueLine
 # from learner.subgraphAggregationGNN import SubgraphAggregationGNN
 # from learner.trainerMisinformation import TrainerMisinformation
 # import learner.evaluatorMisinformation as EvaluateMisinformation
-from alegnn.modules.training import Trainer
-from alegnn.modules.evaluation import evaluate
+from Helpers import sourceTrainer, sourceEvaluate
 
 possible_gnn_models = ['LocalGNNCliqueLine']
 figSize = 7  # Overall size of the figure that contains the plot
@@ -166,8 +165,8 @@ def train_helper(learner_params, train_params, dataset_params, directory):
     else:
         raise ValueError('pooling function in cfg not available')
 
-    trainer = Trainer
-    evaluator = evaluate
+    trainer = sourceTrainer
+    evaluator = sourceEvaluate
 
     assert learner_params['gnn_model'] in possible_gnn_models, (
             'selected GNN model ' + learner_params['gnn_model'] + ' not in ' + str(possible_gnn_models))
@@ -402,12 +401,12 @@ def create_plots(save_dir, trainVars, testVars):
     selectSamplesValid = np.arange(0, len(trainVars['lossValid']), xAxisMultiplierValid)
     lossValidPlot = trainVars['lossValid'][selectSamplesValid]
     plt.subplots_adjust(wspace=0.35, hspace=0.25)
-    sub1 = fig.add_subplot(2, 4, (1, 2))
-    sub2 = fig.add_subplot(2, 4, (3, 4))
-    sub3 = fig.add_subplot(2, 4, (5, 6))
-    sub4 = fig.add_subplot(2, 4, (7, 8))
-    # sub5 = fig.add_subplot(3, 4, 9)
-    # sub6 = fig.add_subplot(3, 4, 10)
+    sub1 = fig.add_subplot(3, 4, (1, 2))
+    sub2 = fig.add_subplot(3, 4, (3, 4))
+    sub3 = fig.add_subplot(3, 4, (5, 6))
+    sub4 = fig.add_subplot(3, 4, (7, 8))
+    sub5 = fig.add_subplot(3, 4, (9, 10))
+    sub6 = fig.add_subplot(3, 4, (11, 12))
 
     ##########################
     # Loss vs Training Steps #
@@ -529,24 +528,31 @@ def create_plots(save_dir, trainVars, testVars):
     sub4.set_xlabel(r'Epochs')
     sub4.legend([r'Training', r'Validation', r'Eval Best Model', r'Eval Last Model'])
     sub4.set_title(r'Misclassification Rate vs. Epochs')
-    plot_confusion_matrix(conf_mat=np.array(testVars['confusionMatrixBest']), figure=fig, axis=sub5)
+    
     labels = ['', 'Fake Posts', 'Real Posts', '']
+    '''
 
+    ###########################
+    # Confusion Matrix - Best #
+    ###########################
+    plot_confusion_matrix(conf_mat=np.array(testVars['confusionMatrixBest']), figure=fig, axis=sub5)
     # UserWarning is suppressed
-    sub5.set_xticklabels(labels)
-    sub5.set_yticklabels(labels)
+    # sub5.set_xticklabels(labels)
+    # sub5.set_yticklabels(labels)
     sub5.set_xlabel(r'Predicted Label')
     sub5.set_ylabel(r'True Label')
     sub5.set_title(r'Confusion Matrix - Best Model')
 
+    ###########################
+    # Confusion Matrix - Last #
+    ###########################
     plot_confusion_matrix(conf_mat=np.array(testVars['confusionMatrixLast']), figure=fig, axis=sub6)
     # UserWarning is suppressed
-    sub6.set_xticklabels(labels)
-    sub6.set_yticklabels(labels)
+    # sub6.set_xticklabels(labels)
+    # sub6.set_yticklabels(labels)
     sub6.set_xlabel(r'Predicted Label')
     sub6.set_ylabel(r'True Label')
     sub6.set_title(r'Confusion Matrix - Last Model')
-    '''
 
     fig.savefig(os.path.join(save_dir, 'figs.png'), dpi=200)
 

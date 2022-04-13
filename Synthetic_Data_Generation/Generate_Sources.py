@@ -10,9 +10,14 @@ import tadasets
 
 if __name__ == '__main__':
     # First, we generate a Cech Complex by sampling points from a torus
-    n_points = 1000  # number of datapoints
+    n_points = 500  # number of datapoints
     epsilon = 0.4  # max distance between datapoints to draw a simplex between
     noise = 0.1  # noise to add during drawing of samples
+    nTrain = 500    # number of training samples to generate
+    nValid = 300    # number of validation samples to generate
+    nTest = 1000     # number of testing samples to generate
+    num_steps = 25  # number of steps for diffusion
+    useGPU = True   # whether to use the GPU for generating samples (for gradient of HG energy function)
 
     # Draws datapoints from a torus
     points = tadasets.torus(n_points, c=2, a=1, noise=noise)
@@ -30,15 +35,9 @@ if __name__ == '__main__':
     sourceHyperedges = np.random.choice(np.arange(H.M), size=numSources, replace=False)
 
     # Plots hypergraph in new window
-    # Get
-    plot_2d_hg(H, SC.pts, sourceHyperedges, '../Learning/data/sourceLoc/')
-
-    # Now, generate the samples for the source localization problem
-    nTrain = 500
-    nValid = 300
-    nTest = 200
-    num_steps = 5
-    useGPU = True
+    print('Plotting...')
+    plot_diffusions_hg(SC, H, sourceHyperedges, num_steps, '../Learning/data/sourceLoc/')
+    plot_2d_hg(H, None, sourceHyperedges, '../Learning/data/sourceLoc/')
 
     # Generate the GSOs for the clique and line expansion
     print('Generating GSOs...')

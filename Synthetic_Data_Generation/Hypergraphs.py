@@ -80,10 +80,11 @@ class Hypergraph:
         for hedge in self.hyperedges:
             for i in range(len(hedge)):
                 for j in range(i+1, len(hedge)):
-                    if G.has_edge(hedge[i], hedge[j]):
-                        G.edges[hedge[i], hedge[j]]['weight'] += 1
-                    else:
-                        G.add_edge(hedge[i], hedge[j], weight=1)
+                    if not hedge[i] == hedge[j]:
+                        if G.has_edge(hedge[i], hedge[j]):
+                            G.edges[hedge[i], hedge[j]]['weight'] += 1
+                        else:
+                            G.add_edge(hedge[i], hedge[j], weight=1)
         return G
 
     # Returns the Laplacian of the clique expansion of the hypergraph

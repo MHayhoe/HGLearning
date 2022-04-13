@@ -194,7 +194,7 @@ class hypergraphSources(_dataForClassification):
             yHat = np.argmax(np.squeeze(yHat.detach().cpu().numpy()), axis=1)
             y = np.squeeze(y.detach().cpu().numpy())
             # Compute the F1 score for all classes at once (not treating classes differently)
-            errorRate = f1_score(y, yHat, average='micro')
+            errorRate = f1_score(y, yHat, average='weighted')
         else:
             yHat = np.argmax(yHat, axis=1)
             y = np.array(y)
@@ -203,6 +203,6 @@ class hypergraphSources(_dataForClassification):
             #   And compute the error
             # totalErrors = np.sum(np.abs(yHat - y) > tol)
             # errorRate = totalErrors.astype(self.dataType) / N
-            errorRate = f1_score(y, yHat, average='micro')
+            errorRate = f1_score(y, yHat, average='weighted')
         #   And from that, compute the accuracy
         return errorRate
