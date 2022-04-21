@@ -607,6 +607,9 @@ def sourceEvaluate(model, data, **kwargs):
     ########
     # DATA #
     ########
+    # \\\ If CUDA is selected, empty cache:
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     xTest, yTest = data.getSamples('test')
     xTest = xTest.to(device)

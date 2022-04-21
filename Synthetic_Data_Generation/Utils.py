@@ -3,6 +3,7 @@ import numpy as np
 import hypernetx as hnx
 import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from matplotlib.collections import PatchCollection
 import os
 
@@ -54,30 +55,31 @@ def plot_2d_hg(H, node_pos=None, markedHedges=[], save_dir=None):
 
 
 # Plot the hypergraph and associated diffusions
-def plot_diffusions_hg(SC, H, sourceEdges, tMax, save_dir=None):
+def plot_diffusions_hg(SC, H, sourceEdges, tMax=10, signals_dict=None, save_dir=None):
     figSize = 7  # Overall size of the figure that contains the plot
     fig = plt.figure(figsize=(3.22 * figSize, 2.4 * figSize))
     nRows = np.ceil(len(sourceEdges)/2).astype(int) + 1
 
     # Plot the simplicial complex
-    sub1 = fig.add_subplot(nRows, 2, 1)
-    sub1.axis('off')
-    points = SC.pts[:,:2]
-    sub1.scatter(points[:,0], points[:,1], color='black')
+    if SC is not None:
+        sub1 = fig.add_subplot(nRows, 2, 1, projection='3d')
+        sub1.axis('off')
+        points = SC.pts
+        sub1.scatter(points[:,0], points[:,1], points[:,2], color='black')
+        sub1.set_box_aspect([1, 1, 0.2])
+        bds = sub1.get_position().bounds
+        scale = 3
+        sub1.set_position([bds[0] - bds[2] * (scale-1)/2, bds[1] - bds[3] * (scale-1)/2, bds[2] * scale, bds[3] * scale])
 
-    for line in SC.n_faces(1):
-        x1, y1 = points[line[0],:]
-        x2, y2 = points[line[1],:]
-        sub1.plot([x1,x2],[y1,y2],color = '#000080')
+        for line in SC.n_faces(1):
+            x1, y1, z1 = points[line[0],:]
+            x2, y2, z2 = points[line[1],:]
+            sub1.plot([x1, x2], [y1, y2], [z1, z2], color='#000080')
 
-    triangles = []
-    for tri in SC.n_faces(2):
-        polygon = Polygon(points[tri,:], True, color='#89CFF0')
-        triangles.append(polygon)
-
-    p = PatchCollection(triangles, cmap=matplotlib.cm.jet, alpha=0.4)
-    sub1.add_collection(p)
-    sub1.set_title('Cech Complex')
+        triangles = []
+        for tri in SC.n_faces(2):
+            sub1.add_collection3d(Poly3DCollection(points[tri,:], cmap=matplotlib.cm.jet, alpha=0.4))
+        sub1.set_title('Cech Complex')
 
     # Plot the hypergraph
     sub2 = fig.add_subplot(nRows, 2, 2)
@@ -87,20 +89,25 @@ def plot_diffusions_hg(SC, H, sourceEdges, tMax, save_dir=None):
               'with_node_labels': False, 'with_edge_labels': False,
               'ax': sub2, 'layout_kwargs': {'seed': 40}}
     hnx.drawing.draw(H_draw.collapse_edges(), **kwargs)
-    sub2.set_title('Hypergraph')
+    sub2.set_title('Hypergraph ({} nodes, {} hyperedges)'.format(H.N, H.M))
 
     plot_index = 3
     for hedge_ind in sourceEdges:
-        # Construct the initial node signal
-        hedge = H.hyperedges[hedge_ind]
-        x0 = np.array([1 if node_ind in hedge else 0 for node_ind in range(H.N)])
+        # Check if we were given a step size and should make our own diffusions, or if they were provided
+        if signals_dict is not None:
+            X = signals_dict[hedge_ind]
+            steps = steps = np.tile(np.arange(0, X.shape[0]), (H.N, 1)).T
+        else:
+            # Construct the initial node signal
+            hedge = H.hyperedges[hedge_ind]
+            x0 = np.array([1 if node_ind in hedge else 0 for node_ind in range(H.N)])
 
-        # Diffuse the node signal for tMax steps
-        X = H.diffuse(x0, tMax)
-        X = np.concatenate((x0[np.newaxis, :], X))
+            # Diffuse the node signal for tMax steps
+            X = H.diffuse(x0, tMax)
+            X = np.concatenate((x0[np.newaxis, :], X))
+            steps = np.tile(np.arange(0, tMax + 1), (H.N, 1)).T
 
         # Plot the diffused signals
-        steps = np.tile(np.arange(0, tMax + 1), (H.N, 1)).T
         sub = fig.add_subplot(nRows, 2, plot_index)
         sub.plot(steps, X)
         sub.set_title('Hyperedge {}'.format(hedge_ind))

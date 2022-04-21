@@ -2,8 +2,10 @@ import numpy as np
 import torch
 from alegnn.utils.dataTools import _dataForClassification
 from sklearn.metrics import f1_score
+# from torchmetrics.functional import f1_score
 from scipy.special import softmax
 from tqdm import tqdm
+from Utils import plot_diffusions_hg
 
 
 def generate_hypergraph_diffusion(sc, n_samples, n_sources, source_upper, timesteps):
@@ -120,7 +122,7 @@ class hypergraphSources(_dataForClassification):
 
     """
 
-    def __init__(self, H, nTrain, nValid, nTest, sourceEdges, tMax=None,
+    def __init__(self, H, nTrain, nValid, nTest, sourceEdges, tMax=None, noiseParams=None, doPlots=False, SC=None,
                  dataType=np.float64, device='cpu'):
         # Initialize parent
         super().__init__()
@@ -151,9 +153,18 @@ class hypergraphSources(_dataForClassification):
             # Construct the initial node signal
             hedge = H.hyperedges[hedge_ind]
             x0 = np.array([1 if node_ind in hedge else 0 for node_ind in range(H.N)])
+            if noiseParams is not None:
+                mu, cov_multiplier = noiseParams
+                noise = np.random.multivariate_normal(mu, np.eye(H.N) * cov_multiplier)
+            else:
+                noise = np.zeros(H.N)
 
             # Diffuse the node signal for tMax steps
-            signals_dict[hedge_ind] = H.diffuse(x0, tMax)
+            signals_dict[hedge_ind] = H.diffuse(x0 + noise, tMax)
+
+        # Plot the diffusions
+        if doPlots:
+            plot_diffusions_hg(SC, H, sourceEdges, signals_dict=signals_dict, save_dir='../Learning/data/sourceLoc/')
 
         # Relabel sources as 0,...,k-1
         relabeledSources = {}
@@ -162,9 +173,19 @@ class hypergraphSources(_dataForClassification):
             relabeledSources[source_ind] = count
             count += 1
 
+        # Get the sampled signals
+        sampled_signals = np.array([signals_dict[sampledSources[i]][sampledTimes[i], :] for i in range(nTotal)])
+
+        # Generate measurement noise
+        if noiseParams is not None:
+            mu, cov_multiplier = noiseParams
+            # covariance = np.mean(np.abs(sampled_signals), axis=1) * cov_multiplier
+            noise = np.random.multivariate_normal(mu, np.eye(H.N)*cov_multiplier, size=nTotal)  # np.array([np.random.multivariate_normal(mu, np.eye(H.N) * covariance[i]) for i in range(nTotal)])
+        else:
+            noise = np.zeros(nTotal, H.N)
+
         # Now, we have the signals and the labels
-        signals = np.expand_dims(np.array([signals_dict[sampledSources[i]][sampledTimes[i], :]
-                                           for i in range(nTotal)]), axis=1)  # nTotal x N
+        signals = np.expand_dims(sampled_signals + noise, axis=1)  # nTotal x 1 x N
         labels = torch.unsqueeze(torch.DoubleTensor([relabeledSources[sampledSources[i]] for i in range(nTotal)]), dim=1) # nTotal x 1
 
         # Split and save them
@@ -177,6 +198,54 @@ class hypergraphSources(_dataForClassification):
         # Change data to specified type and device
         self.astype(self.dataType)
         self.to(self.device)
+
+
+    def f1Score(self, yHat, y, average='weighted'):
+        """
+        Return the weighted F1 Score (f1 score of each class, weighted by class size)
+        """
+        assert average in ['weighted', 'macro', 'micro']
+        yHat = torch.argmax(torch.squeeze(yHat.detach()), dim=1)
+        y = torch.squeeze(y.detach())
+        numClasses = len(self.sourceEdges)
+
+        if average == 'micro':
+            TP_total = torch.zeros(1,device=self.device)
+            FP_total = torch.zeros(1,device=self.device)
+            FN_total = torch.zeros(1,device=self.device)
+        else:
+            f1score = torch.zeros(1,device=self.device)
+
+        # Compute F1 score
+        for i in range(numClasses):
+            predictionMask = yHat == i
+            targetMask = y == i
+            TP = torch.sum(yHat[predictionMask] == y[predictionMask])
+            FP = torch.sum(predictionMask) - TP
+            FN = torch.sum(yHat[targetMask] != y[targetMask])
+            if average == 'micro':
+                TP_total += TP
+                FP_total += FP
+                FN_total += FN
+            # If we're treating classes differently, compute F1 score for this class
+            else:
+                precision = torch.nan_to_num(TP / (TP + FP), nan=0)
+                recall = torch.nan_to_num(TP / (TP + FN), nan=0)
+                # Compute F1 score for this class, if it's nonzero
+                if precision > 0 and recall > 0:
+                    f1 = 2 * precision * recall / (precision + recall)
+                    if average == 'weighted':
+                        f1score += (f1 * torch.sum(targetMask) / y.shape[0])
+                    elif average == 'macro':
+                        f1score += f1 / numClasses
+        # Compute overall Micro-F1 score
+        if average =='micro':
+            precision = TP_total / (TP_total + FP_total)
+            recall = TP_total / (TP_total + FN_total)
+            f1score = torch.nan_to_num(2 * precision * recall / (precision + recall), nan=0)
+
+        return f1score
+
 
     def evaluate(self, yHat, y, tol=1e-9):
         """
@@ -194,7 +263,9 @@ class hypergraphSources(_dataForClassification):
             yHat = np.argmax(np.squeeze(yHat.detach().cpu().numpy()), axis=1)
             y = np.squeeze(y.detach().cpu().numpy())
             # Compute the F1 score for all classes at once (not treating classes differently)
-            errorRate = f1_score(y, yHat, average='weighted')
+            errorRate = f1_score(y, yHat, average='macro')
+            # errorRate = self.f1Score(yHat, y, average='micro')
+            # errorRate = self.metric(yHat, y)
         else:
             yHat = np.argmax(yHat, axis=1)
             y = np.array(y)

@@ -1,9 +1,8 @@
-import jax.numpy as jnp
 import numpy as np
-from jax import grad, jit
 import networkx as nx
 from Simplicial_Complexes import SimplicialComplex
 from tqdm import tqdm
+import csv
 
 
 # Computes a maximal hypergraph from the simplicial complex. In other words, takes all nodes from the SC,
@@ -12,14 +11,25 @@ def from_SC(S : SimplicialComplex):
     return Hypergraph(S.simplices)
 
 
+# Loads hyperedges from a CSV
+def from_CSV(fname):
+    hyperedge_list = []
+    with open(fname, newline='') as csvfile:
+        reader = csv.reader(csvfile, delimiter=',')
+        for row in reader:
+            if len(row) <= 25:
+                hyperedge_list.append(row)
+    return Hypergraph(hyperedge_list)
+
+
 class Hypergraph:
     def __init__(self, hyperedges=[], signals=None):
         self.N = 0
         self.node_map = {}
         self.hyperedges = list(map(lambda hedge: sorted([self.map_node(v) for v in hedge]), hyperedges))
         self.M = len(self.hyperedges)
-        self.laplacian = self.laplacian_operator()
         self.B = self.incidence_matrix()
+        self.laplacian = self.laplacian_operator
 
     # Maps nodes. If it's been seen before, this assigns the old value, otherwise increments node count.
     # node_map is the same as a defaultdict object, but faster with large datasets.
@@ -29,6 +39,9 @@ class Hypergraph:
             self.N += 1
         return self.node_map[v]
 
+    '''
+    # The following code computes the Laplacian operator using the autodifferentiation package JAX.
+    # There were several errors in how it computed the gradient, so this should not be used.
     # Computes the energy of the signal x on the hypergraph
     def energy_fn(self, x):
         energy = 0
@@ -46,10 +59,31 @@ class Hypergraph:
     # Returns the Laplacian operator, i.e., half the gradient of the energy
     def laplacian_operator(self):
         return lambda x: 1/2*jit(grad(self.energy_fn_matrix))(x)
+    '''
 
     # Checks the shape of signals to see if they match hypergraph cardinality
     def check_shape_signals(self, x):
         return x.shape[0] == self.N
+
+    # Computes the Laplacian as the gradient of the energy function
+    def laplacian_operator(self, x):
+        xL = np.zeros(x.shape)
+        for hedge in self.hyperedges:
+            E = np.abs(x[hedge, np.newaxis] - x[hedge]) / len(hedge)
+            maxVal = np.max(E)
+            # Only do the rest if there's energy here
+            if maxVal > 0:
+                maxRows, maxCols = np.nonzero(E == maxVal)
+                for i in range(len(maxRows)):
+                    nodeRow = hedge[maxRows[i]]
+                    nodeCol = hedge[maxCols[i]]
+                    if x[nodeRow] > x[nodeCol]:
+                        xL[nodeRow] = maxVal
+                        xL[nodeCol] = -maxVal
+                    else:
+                        xL[nodeRow] = -maxVal
+                        xL[nodeCol] = maxVal
+        return xL
 
     # Diffuses the signal x according to L for k times, i.e., x(t+1) = x(t) - L(x(t)).
     def diffuse(self, x0=None, k=1):
@@ -60,9 +94,6 @@ class Hypergraph:
 
         for t in tqdm(range(k)):
             x[t+1, :] = x[t, :] - self.laplacian(x[t, :])
-
-        # Remove the initial signal
-        x = x[1:, :]
 
         # If we only diffused once, remove the time dimension
         if k == 1:

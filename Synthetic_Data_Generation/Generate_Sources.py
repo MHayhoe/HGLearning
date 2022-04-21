@@ -11,12 +11,13 @@ import tadasets
 if __name__ == '__main__':
     # First, we generate a Cech Complex by sampling points from a torus
     n_points = 500  # number of datapoints
-    epsilon = 0.4  # max distance between datapoints to draw a simplex between
-    noise = 0.1  # noise to add during drawing of samples
+    epsilon = 0.4   # max distance between datapoints to draw a simplex between
+    noise = 0.01    # noise to add during drawing of samples
     nTrain = 500    # number of training samples to generate
     nValid = 300    # number of validation samples to generate
-    nTest = 1000     # number of testing samples to generate
-    num_steps = 25  # number of steps for diffusion
+    nTest = 300     # number of testing samples to generate
+    num_steps = 20  # number of steps for diffusion
+    numSources = 10  # Treat some hyperedges at random as possible sources
     useGPU = True   # whether to use the GPU for generating samples (for gradient of HG energy function)
 
     # Draws datapoints from a torus
@@ -24,19 +25,16 @@ if __name__ == '__main__':
     # Builds a Cech Complex (saving only the largest connected component)
     SC = CechComplex(points, epsilon, lcc=True)
 
-    # Plots SC in new window
-    plot_2d_sc(SC, '../Learning/data/sourceLoc/')
-
     # Create a hypergraph from the Cech complex
     H = from_SC(SC)
+    # H = from_CSV('../Learning/data/sourceLoc/hyperedges-house-committees.txt')
     print('Hypergraph has {} nodes and {} hyperedges.'.format(H.N, H.M))
-    # Treat 5 hyperedges at random as possible sources
-    numSources = 5
     sourceHyperedges = np.random.choice(np.arange(H.M), size=numSources, replace=False)
 
     # Plots hypergraph in new window
     print('Plotting...')
-    plot_diffusions_hg(SC, H, sourceHyperedges, num_steps, '../Learning/data/sourceLoc/')
+    # plot_diffusions_hg(SC, H, sourceHyperedges, num_steps, '../Learning/data/sourceLoc/')
+    plot_2d_sc(SC, '../Learning/data/sourceLoc/')
     plot_2d_hg(H, None, sourceHyperedges, '../Learning/data/sourceLoc/')
 
     # Generate the GSOs for the clique and line expansion
@@ -48,9 +46,14 @@ if __name__ == '__main__':
     incidence_matrix = [H.incidence_matrix()]
 
     # Create the samples for source localization
+    mu = np.zeros(H.N)          # mean of multivariate normal measurement noise
+    cov_multiplier = 0.01       # factor with which to multiply covariance of multivariate normal measurement noise.
+                                # By default the scale of the covariance is set as the mean of the absolute value of
+                                # the node signals for each sample
     print('Generating {} sources...'.format(numSources))
-    data = hypergraphSources(H, nTrain, nValid, nTest, sourceHyperedges, tMax=num_steps, dataType=torch.float64,
-                             device='cuda:0' if (useGPU and torch.cuda.is_available()) else 'cpu')
+    dataParams = {'tMax': num_steps, 'noiseParams': (mu, cov_multiplier), 'dataType': torch.float64,
+                  'doPlots': True, 'SC': SC, 'device': 'cuda:0' if (useGPU and torch.cuda.is_available()) else 'cpu'}
+    data = hypergraphSources(H, nTrain, nValid, nTest, sourceHyperedges, **dataParams)
 
     # Save everything
     print('Saving...')
