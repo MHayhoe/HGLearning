@@ -42,6 +42,7 @@ from pathlib import Path
 import ast
 from mlxtend.plotting import plot_confusion_matrix
 import sys
+import csv
 
 # \\\ Alelab libraries:
 sys.path.insert(1, os.path.abspath('../graph-neural-networks'))
@@ -58,14 +59,14 @@ startRunTime = datetime.datetime.now()
 # from gnn_data.dataTools import dataMisinformation
 sys.path.insert(1, os.path.abspath('../Synthetic_Data_Generation'))
 from Source_Localization import hypergraphSources
-from architectures import LocalGNNCliqueLine
+from architectures import LocalGNNCliqueLine, LocalGNNClique, LocalGNNLine
 # from learner.aggregationGNN import AggregationGNN_DB
 # from learner.subgraphAggregationGNN import SubgraphAggregationGNN
 # from learner.trainerMisinformation import TrainerMisinformation
 # import learner.evaluatorMisinformation as EvaluateMisinformation
 from Helpers import sourceTrainer, sourceEvaluate
 
-possible_gnn_models = ['LocalGNNCliqueLine']
+possible_gnn_models = ['LocalGNNCliqueLine', 'LocalGNNClique', 'LocalGNNLine']
 figSize = 7  # Overall size of the figure that contains the plot
 lineWidth = 2  # Width of the plot lines
 markerShape = 'o'  # Shape of the markers
@@ -179,28 +180,70 @@ def train_helper(learner_params, train_params, dataset_params, directory):
                          'archit': LocalGNNCliqueLine,
                          'device': 'cuda:0' if (useGPU and torch.cuda.is_available()) else 'cpu',
                          'dimSignals': learner_params['dim_features'],
-                         'nFilterTaps': learner_params['num_filter_taps'],
+                         'nFilterTaps': learner_params['num_filter_taps'], # Graph convolutional parameters
                          'bias': learner_params['bias'],
-                         'nonlinearity': nonlinearity,
+                         'nonlinearity': nonlinearity, # Nonlinearity
                          'nSelectedNodes': None,
                          'poolingFunction': pooling_function,
                          'poolingSize': learner_params['pooling_size'],
+                         # Readout layer: local linear combination of features
+                         # layers after the GCN layers (map); this fully connected layer
+                         # is applied only at each node, without any further exchanges nor
+                         # considering all nodes at once, making the architecture entirely
+                         # local.
                          'dimReadout': learner_params['dim_readout'],
-                         'GSOs': GSOs,
+                         'GSOs': GSOs, # Graph structure
                          'incidence_matrices': incidence_matrices,
                          'sourceEdges': data.sourceEdges}  # Hyperparameters for the SelectionGNN (selGNN)
 
-        # Chosen architecture
+        hParamsDict = hParamsLocGNN
+    elif learner_params['gnn_model'] == 'LocalGNNClique':
+        # \\\ Basic parameters for the Local GNN architecture, with clique expansion only
 
-        # Graph convolutional parameters
-        # Nonlinearity
-        # is affected by the summary
-        # Readout layer: local linear combination of features
-        # layers after the GCN layers (map); this fully connected layer
-        # is applied only at each node, without any further exchanges nor
-        # considering all nodes at once, making the architecture entirely
-        # local.
-        # Graph structure
+        hParamsLocGNN = {'name': 'LocGNN_C',
+                         'archit': LocalGNNClique,
+                         'device': 'cuda:0' if (useGPU and torch.cuda.is_available()) else 'cpu',
+                         'dimSignals': learner_params['dim_features'],
+                         'nFilterTaps': learner_params['num_filter_taps'], # Graph convolutional parameters
+                         'bias': learner_params['bias'],
+                         'nonlinearity': nonlinearity, # Nonlinearity
+                         'nSelectedNodes': None,
+                         'poolingFunction': pooling_function,
+                         'poolingSize': learner_params['pooling_size'],
+                         # Readout layer: local linear combination of features
+                         # layers after the GCN layers (map); this fully connected layer
+                         # is applied only at each node, without any further exchanges nor
+                         # considering all nodes at once, making the architecture entirely
+                         # local.
+                         'dimReadout': learner_params['dim_readout'],
+                         'GSOs': [GSOs[0]], # Graph structure
+                         'incidence_matrices': incidence_matrices,
+                         'sourceEdges': data.sourceEdges}  # Hyperparameters for the SelectionGNN (selGNN)
+
+        hParamsDict = hParamsLocGNN
+    elif learner_params['gnn_model'] == 'LocalGNNLine':
+        # \\\ Basic parameters for the Local GNN architecture, with line graph only
+
+        hParamsLocGNN = {'name': 'LocGNN_L',
+                         'archit': LocalGNNLine,
+                         'device': 'cuda:0' if (useGPU and torch.cuda.is_available()) else 'cpu',
+                         'dimSignals': learner_params['dim_features'],
+                         'nFilterTaps': learner_params['num_filter_taps'], # Graph convolutional parameters
+                         'bias': learner_params['bias'],
+                         'nonlinearity': nonlinearity, # Nonlinearity
+                         'nSelectedNodes': None,
+                         'poolingFunction': pooling_function,
+                         'poolingSize': learner_params['pooling_size'],
+                         # Readout layer: local linear combination of features
+                         # layers after the GCN layers (map); this fully connected layer
+                         # is applied only at each node, without any further exchanges nor
+                         # considering all nodes at once, making the architecture entirely
+                         # local.
+                         'dimReadout': learner_params['dim_readout'],
+                         'GSOs': [GSOs[1]], # Graph structure
+                         'incidence_matrices': incidence_matrices,
+                         'sourceEdges': data.sourceEdges}  # Hyperparameters for the SelectionGNN (selGNN)
+
         hParamsDict = hParamsLocGNN
     elif learner_params['gnn_model'] == 'aggregationGNN':
         # \\\ Basic parameters for the Aggregation GNN architecture
@@ -459,7 +502,7 @@ def create_plots(save_dir, trainVars, testVars):
     sub3.set_ylabel(r'Micro-F1')
     sub3.set_xlabel(r'Training Steps')
     sub3.legend([r'Training', r'Validation', r'Eval Best Model', r'Eval Last Model'])
-    sub3.set_title(r'Micro-F1 vs. Training Steps')
+    sub3.set_title(r'Micro-F1 vs. Training Steps (Best: {:.3f})'.format(testVars['costBest']))
 
     ##################
     # Eval vs Epochs #
@@ -482,7 +525,7 @@ def create_plots(save_dir, trainVars, testVars):
     sub4.set_ylabel(r'Micro-F1')
     sub4.set_xlabel(r'Epochs')
     sub4.legend([r'Training', r'Validation', r'Eval Best Model', r'Eval Last Model'])
-    sub4.set_title(r'Micro-F1 vs. Epochs')
+    sub4.set_title(r'Micro-F1 vs. Epochs (Best: {:.3f})'.format(testVars['costBest']))
 
 
     '''
@@ -614,16 +657,42 @@ def run_experiment(args, section_name=''):
     return trainVars, testVars
 
 
+# Take the output from training and write to a single CSV
+def summarize_cv(cvParams):
+    name = cvParams[list(cvParams.keys())[0]]['config'].get('name', 'localGNNCliqueLine')
+    today = datetime.datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
+    directory = 'models/' + name + '/' + today + '_CV'
+    os.mkdir(directory)
+
+    with open(directory + '/CV.csv', 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile, delimiter=',')
+        writer.writerow(['Name','Train Cost','Validation Cost','Test Cost', '# Epochs',
+                         'LR', 'LR Decay Rate', 'LR Decay Period', '# Features', '# Filter Taps','Readout'])
+
+        for section_name, vars in cvParams.items():
+            trainVars = vars['trainVars']
+            testVars = vars['testVars']
+            config = vars['config']
+            writer.writerow([config.get('gnn_model'), trainVars['costTrain'], trainVars['costValid'],
+                             testVars['costBest'], config.get('n_epochs'),
+                             config.get('learning_rate'), config.get('lr_decay_rate'), config.get('lr_decay_period'),
+                             config.get('dim_features'), config.get('num_filter_taps'), config.get('dim_readout')])
+
+
+
 def main():
     fname = cmd_args.path
     config_file = path.join(path.dirname(__file__), fname)
     config = configparser.ConfigParser()
     config.read(config_file)
     today = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    cvParams = {}
 
     if config.sections():
         for section_name in config.sections():
             trainVars, testVars = run_experiment(config[section_name], section_name)
+            cvParams[section_name] = {'trainVars': trainVars, 'testVars': testVars, 'config': config[section_name]}
+        summarize_cv(cvParams)
     else:
         trainVars, testVars = run_experiment(config[config.default_section])
 

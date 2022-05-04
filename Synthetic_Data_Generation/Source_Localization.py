@@ -139,6 +139,7 @@ class hypergraphSources(_dataForClassification):
         # \\\ Generate the samples
         # total number of samples
         nTotal = nTrain + nValid + nTest
+        self.nTotal = nTotal
         # sample source nodes
         sampledSources = np.random.choice(sourceEdges, size=nTotal)
         # sample diffusion times
@@ -199,6 +200,25 @@ class hypergraphSources(_dataForClassification):
         self.astype(self.dataType)
         self.to(self.device)
 
+    def shuffle(self):
+        signals = np.vstack((self.samples['train']['signals'], self.samples['valid']['signals'],
+                             self.samples['test']['signals']))
+        labels = np.vstack((self.samples['train']['labels'], self.samples['valid']['labels'],
+                            self.samples['test']['labels']))
+
+        shuffledIndices = np.arange(self.nTotal)
+        rng = np.random.default_rng()
+        rng.shuffle(shuffledIndices)
+        signals = signals[shuffledIndices]
+        labels = labels[shuffledIndices]
+
+        # Save the shuffled samples
+        self.samples['train']['signals'] = signals[0:self.nTrain, :, :]
+        self.samples['train']['targets'] = labels[0:self.nTrain]
+        self.samples['valid']['signals'] = signals[self.nTrain:self.nTrain + self.nValid, :, :]
+        self.samples['valid']['targets'] = labels[self.nTrain:self.nTrain + self.nValid]
+        self.samples['test']['signals'] = signals[self.nTrain + self.nValid:, :, :]
+        self.samples['test']['targets'] = labels[self.nTrain + self.nValid:self.nTotal]
 
     def f1Score(self, yHat, y, average='weighted'):
         """
@@ -245,7 +265,6 @@ class hypergraphSources(_dataForClassification):
             f1score = torch.nan_to_num(2 * precision * recall / (precision + recall), nan=0)
 
         return f1score
-
 
     def evaluate(self, yHat, y, tol=1e-9):
         """
