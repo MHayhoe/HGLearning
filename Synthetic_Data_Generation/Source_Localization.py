@@ -123,23 +123,37 @@ class hypergraphSources(_dataForClassification):
     """
 
     def __init__(self, H, nTrain, nValid, nTest, sourceEdges, tMax=None, noiseParams=None, doPlots=False, SC=None,
-                 dataType=np.float64, device='cpu'):
+                 dataType=np.float64, device='cpu', num_folds=None):
         # Initialize parent
         super().__init__()
         # store attributes
         self.dataType = dataType
         self.device = device
-        self.nTrain = nTrain
-        self.nValid = nValid
-        self.nTest = nTest
         self.sourceEdges = sourceEdges
+        self.rng = np.random.default_rng()
         # If no tMax is specified, set it the maximum possible.
         if tMax is None:
             tMax = H.N
-        # \\\ Generate the samples
+        # If we provided a number of folds, we want to do cross-validation.
+        if num_folds is not None:
+            assert isinstance(num_folds, int)
+            fold_size = (nTrain + nValid) // num_folds
+            self.nTrain = (num_folds - 1) * fold_size
+            self.nValid = fold_size
+            shuffledIndices = np.arange(self.nTrain + self.nValid)
+            self.rng.shuffle(shuffledIndices)
+            self.folds = [shuffledIndices[k * fold_size:(k+1) * fold_size] for k in range(num_folds)]
+        else:
+            self.nTrain = nTrain
+            self.nValid = nValid
+            self.folds = None
+
+        self.nTest = nTest
         # total number of samples
         nTotal = nTrain + nValid + nTest
         self.nTotal = nTotal
+
+        # \\\ Generate the samples
         # sample source nodes
         sampledSources = np.random.choice(sourceEdges, size=nTotal)
         # sample diffusion times
@@ -200,6 +214,7 @@ class hypergraphSources(_dataForClassification):
         self.astype(self.dataType)
         self.to(self.device)
 
+    # Shuffles all samples between training, testing, and validation.
     def shuffle(self):
         signals = np.vstack((self.samples['train']['signals'], self.samples['valid']['signals'],
                              self.samples['test']['signals']))
@@ -208,7 +223,7 @@ class hypergraphSources(_dataForClassification):
 
         shuffledIndices = np.arange(self.nTotal)
         rng = np.random.default_rng()
-        rng.shuffle(shuffledIndices)
+        self.rng.shuffle(shuffledIndices)
         signals = signals[shuffledIndices]
         labels = labels[shuffledIndices]
 
@@ -219,6 +234,28 @@ class hypergraphSources(_dataForClassification):
         self.samples['valid']['targets'] = labels[self.nTrain:self.nTrain + self.nValid]
         self.samples['test']['signals'] = signals[self.nTrain + self.nValid:, :, :]
         self.samples['test']['targets'] = labels[self.nTrain + self.nValid:self.nTotal]
+
+    # Sets the validation and training samples up, so that the validation samples are the kth fold and the
+    # training samples are everything else. Does not change the test samples.
+    def cv_set_fold(self, k):
+        if self.folds is None:
+            print("No folds were specified.")
+            return
+        assert k >= 0 and k < len(self.folds)
+
+        signals = np.vstack((self.samples['train']['signals'], self.samples['valid']['signals'],
+                             self.samples['test']['signals']))
+        labels = np.vstack((self.samples['train']['labels'], self.samples['valid']['labels'],
+                            self.samples['test']['labels']))
+
+        validation_indices = self.folds[k]
+        train_indices = np.stack(folds[:k] + folds[(k+1):])
+
+        self.samples['train']['signals'] = signals[train_indices, :, :]
+        self.samples['train']['targets'] = labels[train_indices]
+        self.samples['valid']['signals'] = signals[validation_indices, :, :]
+        self.samples['valid']['targets'] = labels[validation_indices]
+
 
     def f1Score(self, yHat, y, average='weighted'):
         """
