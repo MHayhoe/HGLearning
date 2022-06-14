@@ -528,6 +528,7 @@ class sourceTrainer:
         costTrain = np.array(costTrain)
         lossValid = np.array(lossValid)
         costValid = np.array(costValid)
+        costValidBest = np.max(costValid)
         # And we would like to save all the relevant information from
         # training
         trainVars = {'nEpochs': nEpochs,
@@ -538,7 +539,8 @@ class sourceTrainer:
                      'lossTrain': lossTrain,
                      'costTrain': costTrain,
                      'lossValid': lossValid,
-                     'costValid': costValid
+                     'costValid': costValid,
+                     'costValidBest': costValidBest
                      }
 
         if doSaveVars:

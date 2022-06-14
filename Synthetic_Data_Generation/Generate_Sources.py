@@ -13,11 +13,12 @@ if __name__ == '__main__':
     n_points = 500  # number of datapoints
     epsilon = 0.4   # max distance between datapoints to draw a simplex between
     noise = 0.01    # noise to add during drawing of samples
-    nTrain = 500    # number of training samples to generate
-    nValid = 300    # number of validation samples to generate
+    nTrain = 400    # number of training samples to generate
+    nValid = 100    # number of validation samples to generate
     nTest = 300     # number of testing samples to generate
-    num_steps = 20  # number of steps for diffusion
+    num_steps = 30  # number of steps for diffusion
     numSources = 10  # Treat some hyperedges at random as possible sources
+    num_folds = 5   # Number of folds for cross-validation
     useGPU = True   # whether to use the GPU for generating samples (for gradient of HG energy function)
 
     # Draws datapoints from a torus

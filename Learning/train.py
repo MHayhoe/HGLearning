@@ -73,7 +73,7 @@ markerShape = 'o'  # Shape of the markers
 markerSize = 3  # Size of the markers
 xAxisMultiplierTrain = 5  # How many training steps in between those shown in
 # the plot, i.e., one training step every xAxisMultiplierTrain is shown.
-xAxisMultiplierValid = 1  # How many validation steps in between those shown,
+# xAxisMultiplierValid = 1  # How many validation steps in between those shown,
 
 
 # same as above.
@@ -130,6 +130,10 @@ def train_helper(learner_params, train_params, dataset_params, directory):
         GSOs = [torch.tensor(X.todense(), device='cpu') for X in GSOs]
         incidence_matrices = [torch.tensor(X, device='cpu') for X in incidence_matrices]
         data.to('cpu')
+
+    # If we want to do CV, set it up
+    if dataset_params['num_folds'] is not None:
+        data.cv_initialize_folds(dataset_params['num_folds'])
 
     ############
     # TRAINING #
@@ -375,37 +379,78 @@ def train_helper(learner_params, train_params, dataset_params, directory):
     # MODEL #
     #########
 
-    modelCreated = model.Model(thisArchit,
-                               thisLossFunction,
-                               thisOptim,
-                               thisTrainer,
-                               thisEvaluator,
-                               thisDevice,
-                               thisName,
-                               save_dir)
+    if data.num_folds is None:
+        modelCreated = model.Model(thisArchit, thisLossFunction, thisOptim, thisTrainer, thisEvaluator, thisDevice,
+                                   thisName, save_dir)
+        modelsGNN[thisName] = modelCreated
 
-    modelsGNN[thisName] = modelCreated
+        print()
+        print("Training model %s..." % thisName)
 
-    print()
-    print("Training model %s..." % thisName)
+        if train_params['lr_decay']:
+            thisTrainVars = modelsGNN[thisName].train(data, train_params['n_epochs'], train_params['batch_size'],
+                                                        validationInterval=train_params['validation_interval'],
+                                                        printInterval=train_params['print_interval'],
+                                                        learningRateDecayRate=train_params['lr_decay_rate'],
+                                                        learningRateDecayPeriod=train_params['lr_decay_period'])
+        else:
+            thisTrainVars = modelsGNN[thisName].train(data, train_params['n_epochs'], train_params['batch_size'],
+                                                        validationInterval=train_params['validation_interval'],
+                                                        printInterval=train_params['print_interval'])
 
-    if train_params['lr_decay']:
-        thisTrainVars = modelsGNN[thisName].train(data, train_params['n_epochs'], train_params['batch_size'],
-                                                  validationInterval=train_params['validation_interval'],
-                                                  printInterval=train_params['print_interval'],
-                                                  learningRateDecayRate=train_params['lr_decay_rate'],
-                                                  learningRateDecayPeriod=train_params['lr_decay_period'])
+        ###########
+        # TESTING #
+        ###########
+        print()
+        print("Evaluating model %s..." % thisName)
+        thisTestVars = modelsGNN[thisName].evaluate(data)
     else:
-        thisTrainVars = modelsGNN[thisName].train(data, train_params['n_epochs'], train_params['batch_size'],
-                                                  validationInterval=train_params['validation_interval'],
-                                                  printInterval=train_params['print_interval'])
+        trainVarsCV = []
+        testVarsCV = []
+        for k in range(data.num_folds):
+            # Set up the folds of data for cross-validation
+            data.cv_set_fold(k)
+            modelCreated = model.Model(thisArchit, thisLossFunction, thisOptim, thisTrainer, thisEvaluator, thisDevice,
+                                       thisName, save_dir)
+            modelsGNN[thisName] = modelCreated
 
-    ###########
-    # TESTING #
-    ###########
-    print()
-    print("Evaluating model %s..." % thisName)
-    thisTestVars = modelsGNN[thisName].evaluate(data)
+            print()
+            print("Training model %s..." % thisName)
+
+            if train_params['lr_decay']:
+                trainVarsCV.append( modelsGNN[thisName].train(data, train_params['n_epochs'], train_params['batch_size'],
+                                                          validationInterval=train_params['validation_interval'],
+                                                          printInterval=train_params['print_interval'],
+                                                          learningRateDecayRate=train_params['lr_decay_rate'],
+                                                          learningRateDecayPeriod=train_params['lr_decay_period']) )
+            else:
+                trainVarsCV.append( modelsGNN[thisName].train(data, train_params['n_epochs'], train_params['batch_size'],
+                                                          validationInterval=train_params['validation_interval'],
+                                                          printInterval=train_params['print_interval']) )
+
+            ###########
+            # TESTING #
+            ###########
+            print()
+            print("Evaluating model %s..." % thisName)
+            testVarsCV.append( modelsGNN[thisName].evaluate(data) )
+
+        # Average across the cross-validation folds
+        thisTrainVars = trainVarsCV[0]
+        thisTestVars = testVarsCV[0]
+        train_keys = ['lossTrain', 'costTrain', 'lossValid', 'costValid', 'costValidBest']
+        test_keys = ['costBest', 'costLast', 'confusionMatrixBest', 'confusionMatrixLast']
+
+        for key_name in train_keys:
+            thisTrainVars[key_name] = trainVarsCV[0][key_name] / data.num_folds
+            for fold_ind in range(1,data.num_folds):
+                thisTrainVars[key_name] += trainVarsCV[fold_ind][key_name] / data.num_folds
+
+        for key_name in test_keys:
+            thisTestVars[key_name] = testVarsCV[0][key_name] / data.num_folds
+            for fold_ind in range(1,data.num_folds):
+                thisTestVars[key_name] += testVarsCV[fold_ind][key_name] / data.num_folds
+
     writeVarValues(varsFile,
                    {'costBestl%s%03dR%02d' % \
                     (thisName, 1, 1): thisTestVars['costBest'],
@@ -431,18 +476,16 @@ def train_helper(learner_params, train_params, dataset_params, directory):
 
 def create_plots(save_dir, trainVars, testVars):
     fig = plt.figure(figsize=(3.22 * figSize, 2.4 * figSize))
+    xAxisMultiplierValid = trainVars['validationInterval'] / trainVars['nBatches']
     xTrain = np.arange(0, trainVars['nEpochs'] * trainVars['nBatches'], xAxisMultiplierTrain)
-    xValid = np.arange(0, trainVars['nEpochs'] * trainVars['nBatches'], \
-                       trainVars['validationInterval'] * xAxisMultiplierValid)
-    # xValid = np.append(xValid, xTrain[-1])
-    xValidEpochs = np.arange(0, trainVars['nEpochs'], \
-                             trainVars['validationInterval'] * xAxisMultiplierValid)
+    xValid = np.arange(0, trainVars['nEpochs'] * trainVars['nBatches'], trainVars['validationInterval'])
+    xValidEpochs = np.arange(0, trainVars['nEpochs'], xAxisMultiplierValid)
 
     xEpochs = np.arange(0, trainVars['nEpochs'])
-    xValidEpochs = np.append(xValidEpochs, xEpochs[-1])
+    # xValidEpochs = np.append(xValidEpochs, xEpochs[-1])
     lossTrainPlot = trainVars['lossTrain'][xTrain]
-    selectSamplesValid = np.arange(0, len(trainVars['lossValid']), xAxisMultiplierValid)
-    lossValidPlot = trainVars['lossValid'][selectSamplesValid]
+    # selectSamplesValid = np.arange(0, len(trainVars['lossValid']), xAxisMultiplierValid)
+    lossValidPlot = trainVars['lossValid']
     plt.subplots_adjust(wspace=0.35, hspace=0.25)
     sub1 = fig.add_subplot(3, 4, (1, 2))
     sub2 = fig.add_subplot(3, 4, (3, 4))
@@ -472,7 +515,7 @@ def create_plots(save_dir, trainVars, testVars):
     sub2.plot(xEpochs, lossEpochTrainPlot,
               color='#01256E', linewidth=lineWidth,
               marker=markerShape, markersize=markerSize)
-    sub2.plot(xEpochs, lossValidPlot,
+    sub2.plot(xValidEpochs, lossValidPlot,
               color='#A1CAF1', linewidth=lineWidth,
               marker=markerShape, markersize=markerSize)
     sub2.set_ylabel(r'Loss')
@@ -484,7 +527,7 @@ def create_plots(save_dir, trainVars, testVars):
     # Eval vs Training Steps #
     ##########################
     costTrainPlot = trainVars['costTrain'][xTrain]
-    costValidPlot = trainVars['costValid'][selectSamplesValid]
+    costValidPlot = trainVars['costValid']
     sub3.plot(xTrain, costTrainPlot,
               color='#01256E', linewidth=lineWidth,
               marker=markerShape, markersize=markerSize)
@@ -511,7 +554,7 @@ def create_plots(save_dir, trainVars, testVars):
     sub4.plot(xEpochs, costEpochTrainPlot,
               color='#01256E', linewidth=lineWidth,
               marker=markerShape, markersize=markerSize)
-    sub4.plot(xEpochs, costValidPlot,
+    sub4.plot(xValidEpochs, costValidPlot,
               color='#A1CAF1', linewidth=lineWidth,
               marker=markerShape, markersize=markerSize)
     sub4.plot([0, xEpochs[-1]], 2 * [testVars['costBest']],
@@ -578,7 +621,7 @@ def create_plots(save_dir, trainVars, testVars):
     ###########################
     # Confusion Matrix - Best #
     ###########################
-    plot_confusion_matrix(conf_mat=np.array(testVars['confusionMatrixBest']), figure=fig, axis=sub5)
+    plot_confusion_matrix(conf_mat=np.array(testVars['confusionMatrixBest'],dtype=int), figure=fig, axis=sub5)
     # UserWarning is suppressed
     # sub5.set_xticklabels(labels)
     # sub5.set_yticklabels(labels)
@@ -589,7 +632,7 @@ def create_plots(save_dir, trainVars, testVars):
     ###########################
     # Confusion Matrix - Last #
     ###########################
-    plot_confusion_matrix(conf_mat=np.array(testVars['confusionMatrixLast']), figure=fig, axis=sub6)
+    plot_confusion_matrix(conf_mat=np.array(testVars['confusionMatrixLast'], dtype=int), figure=fig, axis=sub6)
     # UserWarning is suppressed
     # sub6.set_xticklabels(labels)
     # sub6.set_yticklabels(labels)
@@ -637,6 +680,7 @@ def run_experiment(args, section_name=''):
     dataset_params = {
         'matrix_path': args.get('matrix_path', 'data/sourceLoc/sourceLoc'),
         'data_path': args.get('data_path', 'data/sourceLoc/sourceLoc_data.pkl'),
+        'num_folds': args.get('num_folds', None),
         'normalize_graph_signal': args.getboolean('normalize_graph_signal', False),
         'prop_data_train': args.getfloat('prop_data_train', 0.6),
         'prop_data_valid': args.getfloat('prop_data_valid', 0.2),
@@ -666,7 +710,7 @@ def summarize_cv(cvParams):
 
     with open(directory + '/CV.csv', 'w', newline='') as csvfile:
         writer = csv.writer(csvfile, delimiter=',')
-        writer.writerow(['Name','Train Cost','Validation Cost','Test Cost', '# Epochs',
+        writer.writerow(['Name','Train Cost','Validation Cost','Validation Best','Test Cost', '# Epochs',
                          'LR', 'LR Decay Rate', 'LR Decay Period', '# Features', '# Filter Taps','Readout'])
 
         for section_name, vars in cvParams.items():
@@ -674,7 +718,7 @@ def summarize_cv(cvParams):
             testVars = vars['testVars']
             config = vars['config']
             writer.writerow([config.get('gnn_model'), trainVars['costTrain'], trainVars['costValid'],
-                             testVars['costBest'], config.get('n_epochs'),
+                             trainVars['costValidBest'], testVars['costBest'], config.get('n_epochs'),
                              config.get('learning_rate'), config.get('lr_decay_rate'), config.get('lr_decay_period'),
                              config.get('dim_features'), config.get('num_filter_taps'), config.get('dim_readout')])
 
