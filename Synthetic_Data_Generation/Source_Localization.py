@@ -129,6 +129,12 @@ class hypergraphSources(_dataForClassification):
         # store attributes
         self.dataType = dataType
         self.device = device
+        self.nTrain = nTrain
+        self.nValid = nValid
+        self.nTest = nTest
+        # total number of samples
+        nTotal = nTrain + nValid + nTest
+        self.nTotal = nTotal
         self.sourceEdges = sourceEdges
         self.rng = np.random.default_rng()
         # If no tMax is specified, set it the maximum possible.
@@ -136,22 +142,9 @@ class hypergraphSources(_dataForClassification):
             tMax = H.N
         # If we provided a number of folds, we want to do cross-validation.
         if num_folds is not None:
-            assert isinstance(num_folds, int)
-            fold_size = (nTrain + nValid) // num_folds
-            self.nTrain = (num_folds - 1) * fold_size
-            self.nValid = fold_size
-            shuffledIndices = np.arange(self.nTrain + self.nValid)
-            self.rng.shuffle(shuffledIndices)
-            self.folds = [shuffledIndices[k * fold_size:(k+1) * fold_size] for k in range(num_folds)]
+            self.cv_initialize_folds(num_folds)
         else:
-            self.nTrain = nTrain
-            self.nValid = nValid
-            self.folds = None
-
-        self.nTest = nTest
-        # total number of samples
-        nTotal = nTrain + nValid + nTest
-        self.nTotal = nTotal
+            self.num_folds = None
 
         # \\\ Generate the samples
         # sample source nodes
@@ -218,8 +211,8 @@ class hypergraphSources(_dataForClassification):
     def shuffle(self):
         signals = np.vstack((self.samples['train']['signals'], self.samples['valid']['signals'],
                              self.samples['test']['signals']))
-        labels = np.vstack((self.samples['train']['labels'], self.samples['valid']['labels'],
-                            self.samples['test']['labels']))
+        labels = np.vstack((self.samples['train']['targets'], self.samples['valid']['targets'],
+                            self.samples['test']['targets']))
 
         shuffledIndices = np.arange(self.nTotal)
         rng = np.random.default_rng()
@@ -235,21 +228,36 @@ class hypergraphSources(_dataForClassification):
         self.samples['test']['signals'] = signals[self.nTrain + self.nValid:, :, :]
         self.samples['test']['targets'] = labels[self.nTrain + self.nValid:self.nTotal]
 
+    # Sets up the cross-validation folds
+    def cv_initialize_folds(self, num_folds):
+        if not isinstance(num_folds, int):
+            num_folds = int(num_folds)
+        # Set up the folds, adjusting the number of samples if necessary
+        self.num_folds = num_folds
+        fold_size = (self.nTrain + self.nValid) // num_folds
+        self.nTrain = (num_folds - 1) * fold_size
+        self.nValid = fold_size
+
+        # Set up the folds
+        shuffledIndices = np.arange(self.nTrain + self.nValid)
+        self.rng.shuffle(shuffledIndices)
+        self.folds = [shuffledIndices[k * fold_size:(k + 1) * fold_size] for k in range(num_folds)]
+
     # Sets the validation and training samples up, so that the validation samples are the kth fold and the
     # training samples are everything else. Does not change the test samples.
     def cv_set_fold(self, k):
-        if self.folds is None:
-            print("No folds were specified.")
+        if self.num_folds is None:
+            print("No folds have been specified. Run cv_initialize_folds() to set up cross-validation.")
             return
         assert k >= 0 and k < len(self.folds)
 
-        signals = np.vstack((self.samples['train']['signals'], self.samples['valid']['signals'],
+        signals = torch.vstack((self.samples['train']['signals'], self.samples['valid']['signals'],
                              self.samples['test']['signals']))
-        labels = np.vstack((self.samples['train']['labels'], self.samples['valid']['labels'],
-                            self.samples['test']['labels']))
+        labels = torch.vstack((self.samples['train']['targets'], self.samples['valid']['targets'],
+                            self.samples['test']['targets']))
 
         validation_indices = self.folds[k]
-        train_indices = np.stack(folds[:k] + folds[(k+1):])
+        train_indices = np.stack(self.folds[:k] + self.folds[(k+1):]).flatten()
 
         self.samples['train']['signals'] = signals[train_indices, :, :]
         self.samples['train']['targets'] = labels[train_indices]
