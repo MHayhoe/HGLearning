@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 import networkx as nx
 from Simplicial_Complexes import SimplicialComplex
 from tqdm import tqdm
@@ -21,6 +22,20 @@ def from_CSV(fname):
                 hyperedge_list.append(row)
     return Hypergraph(hyperedge_list)
 
+
+# Creates a normalized hypergraph Laplacian matrix from a hypergraph incidence matrix
+def HG_normalized_Laplacian_from_incidence(B_list):
+    L_list = []
+
+    for B in B_list:
+        hedge_weights = torch.sum(B, axis=0)
+        D_e_inv = torch.float_power(hedge_weights, -1)
+        node_weights = torch.sum(B, axis=1)
+        D_u_neghalf = torch.float_power(node_weights, -1/2)
+        BD_u = (B.T * D_u_neghalf)
+        L = torch.eye(B.shape[0], device=B.device) - BD_u.T * D_e_inv @ BD_u
+        L_list.append(L)
+    return L_list
 
 class Hypergraph:
     def __init__(self, hyperedges=[], signals=None):

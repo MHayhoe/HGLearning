@@ -59,14 +59,15 @@ startRunTime = datetime.datetime.now()
 # from gnn_data.dataTools import dataMisinformation
 sys.path.insert(1, os.path.abspath('../Synthetic_Data_Generation'))
 from Source_Localization import hypergraphSources
-from architectures import LocalGNNCliqueLine, LocalGNNClique, LocalGNNLine
+from Hypergraphs import HG_normalized_Laplacian_from_incidence
+from architectures import LocalGNNCliqueLine, LocalGNNHGLap, LocalGNNClique, LocalGNNLine
 # from learner.aggregationGNN import AggregationGNN_DB
 # from learner.subgraphAggregationGNN import SubgraphAggregationGNN
 # from learner.trainerMisinformation import TrainerMisinformation
 # import learner.evaluatorMisinformation as EvaluateMisinformation
 from Helpers import sourceTrainer, sourceEvaluate
 
-possible_gnn_models = ['LocalGNNCliqueLine', 'LocalGNNClique', 'LocalGNNLine']
+possible_gnn_models = ['LocalGNNCliqueLine', 'LocalGNNHGLap', 'LocalGNNClique', 'LocalGNNLine']
 figSize = 7  # Overall size of the figure that contains the plot
 lineWidth = 2  # Width of the plot lines
 markerShape = 'o'  # Shape of the markers
@@ -184,9 +185,9 @@ def train_helper(learner_params, train_params, dataset_params, directory):
                          'archit': LocalGNNCliqueLine,
                          'device': 'cuda:0' if (useGPU and torch.cuda.is_available()) else 'cpu',
                          'dimSignals': learner_params['dim_features'],
-                         'nFilterTaps': learner_params['num_filter_taps'], # Graph convolutional parameters
+                         'nFilterTaps': learner_params['num_filter_taps'],  # Graph convolutional parameters
                          'bias': learner_params['bias'],
-                         'nonlinearity': nonlinearity, # Nonlinearity
+                         'nonlinearity': nonlinearity,  # Nonlinearity
                          'nSelectedNodes': None,
                          'poolingFunction': pooling_function,
                          'poolingSize': learner_params['pooling_size'],
@@ -196,7 +197,31 @@ def train_helper(learner_params, train_params, dataset_params, directory):
                          # considering all nodes at once, making the architecture entirely
                          # local.
                          'dimReadout': learner_params['dim_readout'],
-                         'GSOs': GSOs, # Graph structure
+                         'GSOs': GSOs,  # Graph structure
+                         'incidence_matrices': incidence_matrices,
+                         'sourceEdges': data.sourceEdges}  # Hyperparameters for the SelectionGNN (selGNN)
+
+        hParamsDict = hParamsLocGNN
+    elif learner_params['gnn_model'] == 'LocalGNNHGLap':
+        # \\\ Basic parameters for the Local GNN architecture, with clique expansion only
+
+        hParamsLocGNN = {'name': 'LocGNN_HGL',
+                         'archit': LocalGNNHGLap,
+                         'device': 'cuda:0' if (useGPU and torch.cuda.is_available()) else 'cpu',
+                         'dimSignals': learner_params['dim_features'],
+                         'nFilterTaps': learner_params['num_filter_taps'],  # Graph convolutional parameters
+                         'bias': learner_params['bias'],
+                         'nonlinearity': nonlinearity,  # Nonlinearity
+                         'nSelectedNodes': None,
+                         'poolingFunction': pooling_function,
+                         'poolingSize': learner_params['pooling_size'],
+                         # Readout layer: local linear combination of features
+                         # layers after the GCN layers (map); this fully connected layer
+                         # is applied only at each node, without any further exchanges nor
+                         # considering all nodes at once, making the architecture entirely
+                         # local.
+                         'dimReadout': learner_params['dim_readout'],
+                         'GSOs': HG_normalized_Laplacian_from_incidence(incidence_matrices),  # Graph structure
                          'incidence_matrices': incidence_matrices,
                          'sourceEdges': data.sourceEdges}  # Hyperparameters for the SelectionGNN (selGNN)
 
@@ -208,9 +233,9 @@ def train_helper(learner_params, train_params, dataset_params, directory):
                          'archit': LocalGNNClique,
                          'device': 'cuda:0' if (useGPU and torch.cuda.is_available()) else 'cpu',
                          'dimSignals': learner_params['dim_features'],
-                         'nFilterTaps': learner_params['num_filter_taps'], # Graph convolutional parameters
+                         'nFilterTaps': learner_params['num_filter_taps'],  # Graph convolutional parameters
                          'bias': learner_params['bias'],
-                         'nonlinearity': nonlinearity, # Nonlinearity
+                         'nonlinearity': nonlinearity,  # Nonlinearity
                          'nSelectedNodes': None,
                          'poolingFunction': pooling_function,
                          'poolingSize': learner_params['pooling_size'],
@@ -220,7 +245,7 @@ def train_helper(learner_params, train_params, dataset_params, directory):
                          # considering all nodes at once, making the architecture entirely
                          # local.
                          'dimReadout': learner_params['dim_readout'],
-                         'GSOs': [GSOs[0]], # Graph structure
+                         'GSOs': [GSOs[0]],  # Graph structure
                          'incidence_matrices': incidence_matrices,
                          'sourceEdges': data.sourceEdges}  # Hyperparameters for the SelectionGNN (selGNN)
 
@@ -232,9 +257,9 @@ def train_helper(learner_params, train_params, dataset_params, directory):
                          'archit': LocalGNNLine,
                          'device': 'cuda:0' if (useGPU and torch.cuda.is_available()) else 'cpu',
                          'dimSignals': learner_params['dim_features'],
-                         'nFilterTaps': learner_params['num_filter_taps'], # Graph convolutional parameters
+                         'nFilterTaps': learner_params['num_filter_taps'],  # Graph convolutional parameters
                          'bias': learner_params['bias'],
-                         'nonlinearity': nonlinearity, # Nonlinearity
+                         'nonlinearity': nonlinearity,  # Nonlinearity
                          'nSelectedNodes': None,
                          'poolingFunction': pooling_function,
                          'poolingSize': learner_params['pooling_size'],
@@ -244,7 +269,7 @@ def train_helper(learner_params, train_params, dataset_params, directory):
                          # considering all nodes at once, making the architecture entirely
                          # local.
                          'dimReadout': learner_params['dim_readout'],
-                         'GSOs': [GSOs[1]], # Graph structure
+                         'GSOs': [GSOs[1]],  # Graph structure
                          'incidence_matrices': incidence_matrices,
                          'sourceEdges': data.sourceEdges}  # Hyperparameters for the SelectionGNN (selGNN)
 
@@ -442,14 +467,14 @@ def train_helper(learner_params, train_params, dataset_params, directory):
         test_keys = ['costBest', 'costLast', 'confusionMatrixBest', 'confusionMatrixLast']
 
         for key_name in train_keys:
-            thisTrainVars[key_name] = trainVarsCV[0][key_name] / data.num_folds
-            for fold_ind in range(1,data.num_folds):
-                thisTrainVars[key_name] += trainVarsCV[fold_ind][key_name] / data.num_folds
+            stacked_vars = np.stack([trainVarsCV[fold_ind][key_name] for fold_ind in range(data.num_folds)])
+            thisTrainVars[key_name] = np.mean(stacked_vars, axis=0)
+            thisTrainVars[key_name + '_std'] = np.std(stacked_vars, axis=0)
 
         for key_name in test_keys:
-            thisTestVars[key_name] = testVarsCV[0][key_name] / data.num_folds
-            for fold_ind in range(1,data.num_folds):
-                thisTestVars[key_name] += testVarsCV[fold_ind][key_name] / data.num_folds
+            stacked_vars = np.stack([testVarsCV[fold_ind][key_name] for fold_ind in range(data.num_folds)])
+            thisTestVars[key_name] = np.mean(stacked_vars, axis=0)
+            thisTestVars[key_name + '_std'] = np.std(stacked_vars, axis=0)
 
     writeVarValues(varsFile,
                    {'costBestl%s%03dR%02d' % \
@@ -486,6 +511,7 @@ def create_plots(save_dir, trainVars, testVars):
     lossTrainPlot = trainVars['lossTrain'][xTrain]
     # selectSamplesValid = np.arange(0, len(trainVars['lossValid']), xAxisMultiplierValid)
     lossValidPlot = trainVars['lossValid']
+    lossValidStdPlot = trainVars['lossValid_std']
     plt.subplots_adjust(wspace=0.35, hspace=0.25)
     sub1 = fig.add_subplot(3, 4, (1, 2))
     sub2 = fig.add_subplot(3, 4, (3, 4))
@@ -512,12 +538,17 @@ def create_plots(save_dir, trainVars, testVars):
     # Loss vs Epochs #
     ##################
     lossEpochTrainPlot = np.mean(trainVars['lossTrain'].reshape(trainVars['nEpochs'], trainVars['nBatches']), axis=1)
+    lossEpochTrainStdPlot = np.mean(trainVars['lossTrain_std'].reshape(trainVars['nEpochs'], trainVars['nBatches']), axis=1)
     sub2.plot(xEpochs, lossEpochTrainPlot,
               color='#01256E', linewidth=lineWidth,
               marker=markerShape, markersize=markerSize)
+    sub2.fill_between(xEpochs, lossEpochTrainPlot + lossEpochTrainStdPlot, lossEpochTrainPlot - lossEpochTrainStdPlot,
+                      color='#01256E', linewidth=lineWidth, alpha=0.3)
     sub2.plot(xValidEpochs, lossValidPlot,
               color='#A1CAF1', linewidth=lineWidth,
               marker=markerShape, markersize=markerSize)
+    sub2.fill_between(xValidEpochs, lossValidPlot + lossValidStdPlot, lossValidPlot - lossValidStdPlot,
+              color='#A1CAF1', linewidth=lineWidth, alpha=0.3)
     sub2.set_ylabel(r'Loss')
     sub2.set_xlabel(r'Epochs')
     sub2.legend([r'Training', r'Validation'])
@@ -551,12 +582,18 @@ def create_plots(save_dir, trainVars, testVars):
     # Eval vs Epochs #
     ##################
     costEpochTrainPlot = np.mean(trainVars['costTrain'].reshape(trainVars['nEpochs'], trainVars['nBatches']), axis=1)
+    costEpochTrainStdPlot = np.mean(trainVars['costTrain_std'].reshape(trainVars['nEpochs'], trainVars['nBatches']), axis=1)
+    costValidStdPlot = trainVars['costValid_std']
     sub4.plot(xEpochs, costEpochTrainPlot,
               color='#01256E', linewidth=lineWidth,
               marker=markerShape, markersize=markerSize)
+    sub4.fill_between(xEpochs, costEpochTrainPlot + costEpochTrainStdPlot, costEpochTrainPlot - costEpochTrainStdPlot,
+              color='#01256E', linewidth=lineWidth, alpha=0.3)
     sub4.plot(xValidEpochs, costValidPlot,
               color='#A1CAF1', linewidth=lineWidth,
               marker=markerShape, markersize=markerSize)
+    sub4.fill_between(xValidEpochs, costValidPlot + costValidStdPlot, costValidPlot - costValidStdPlot,
+              color='#A1CAF1', linewidth=lineWidth, alpha=0.3)
     sub4.plot([0, xEpochs[-1]], 2 * [testVars['costBest']],
               color='#9E5B2D', linewidth=lineWidth,
               linestyle='-.',
@@ -718,10 +755,11 @@ def summarize_cv(cvParams):
             testVars = vars['testVars']
             config = vars['config']
             writer.writerow([config.get('gnn_model'), trainVars['costTrain'], trainVars['costValid'],
-                             trainVars['costValidBest'], testVars['costBest'], config.get('n_epochs'),
-                             config.get('learning_rate'), config.get('lr_decay_rate'), config.get('lr_decay_period'),
-                             config.get('dim_features'), config.get('num_filter_taps'), config.get('dim_readout')])
-
+                             str(trainVars['costValidBest']) + ' +/- ' + str(trainVars['costValidBest_std']),
+                             str(testVars['costBest']) + ' +/- ' + str(testVars['costBest_std']),
+                             config.get('n_epochs'), config.get('learning_rate'), config.get('lr_decay_rate'),
+                             config.get('lr_decay_period'), config.get('dim_features'), config.get('num_filter_taps'),
+                             config.get('dim_readout')])
 
 
 def main():
