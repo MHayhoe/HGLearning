@@ -10,12 +10,12 @@ import tadasets
 
 if __name__ == '__main__':
     # First, we generate a Cech Complex by sampling points from a torus
-    n_points = 500  # number of datapoints
-    epsilon = 0.4   # max distance between datapoints to draw a simplex between
-    noise = 0.01    # noise to add during drawing of samples
+    n_points = 1000  # number of datapoints
+    epsilon = 0.3   # max distance between datapoints to draw a simplex between
+    noise = 0.05    # noise to add during drawing of samples
     nTrain = 400    # number of training samples to generate
     nValid = 100    # number of validation samples to generate
-    nTest = 300     # number of testing samples to generate
+    nTest = 500     # number of testing samples to generate
     num_steps = 30  # number of steps for diffusion
     numSources = 10  # Treat some hyperedges at random as possible sources
     num_folds = 5   # Number of folds for cross-validation

@@ -134,8 +134,15 @@ class Hypergraph:
         return G
 
     # Returns the Laplacian of the clique expansion of the hypergraph
-    def clique_laplacian(self):
-        return nx.normalized_laplacian_matrix(self.clique_expansion())
+    def clique_laplacian(self, as_tensor=False):
+        L_c = nx.normalized_laplacian_matrix(self.clique_expansion())
+        # Return a sparse tensor
+        if as_tensor:
+            indices = np.nonzero(L_c)
+            values = torch.tensor(L_c[indices]).squeeze()
+            return torch.sparse_coo_tensor(np.array(indices), values, (L_c.shape[0], L_c.shape[1]))
+        else:
+            return L_c
 
     # Returns the line expansion graph of the hypergraph
     def line_expansion(self):
@@ -151,16 +158,28 @@ class Hypergraph:
         return G
 
     # Returns the Laplacian of the line expansion of the hypergraph
-    def line_laplacian(self):
-        return nx.normalized_laplacian_matrix(self.line_expansion())
+    def line_laplacian(self, as_tensor=False):
+        L_l = nx.normalized_laplacian_matrix(self.line_expansion())
+        # Return a sparse tensor
+        if as_tensor:
+            indices = np.nonzero(L_l)
+            values = torch.tensor(L_l[indices]).squeeze()
+            return torch.sparse_coo_tensor(np.array(indices), values, (L_l.shape[0], L_l.shape[1]))
+        else:
+            return L_l
 
     # Returns the incidence matrix of the hypergraph
-    def incidence_matrix(self):
+    def incidence_matrix(self, as_tensor=False):
         B = np.zeros((self.N, self.M))
         for i in range(self.M):
             B[self.hyperedges[i], i] = 1
-
-        return B
+        # Return a sparse tensor
+        if as_tensor:
+            indices = np.nonzero(B)
+            values = torch.tensor(B[indices]).squeeze()
+            return torch.sparse_coo_tensor(np.array(indices), values, (B.shape[0], B.shape[1]))
+        else:
+            return B
 
     # Computes the Simplicial Complex from the dual of the hypergraph
     def sc_dual(self, x):

@@ -8,6 +8,21 @@ from matplotlib.collections import PatchCollection
 import os
 
 
+# Compute the spectral similarity between two square, symmetric, positive semi-definite, irreducible
+# matrices of the same size.
+# Finds the largest value epsilon (eps) such that (1 - eps)*lambda_i(A) <= lambda_i(B) <= (1 + eps)*lambda_i(A)
+def spectral_similarity(A, B):
+    # Compute eigenvalues, ignoring the smallest (since it is zero, up to numerical precision)
+    eigs_A = np.linalg.eigvalsh(A)[1:]
+    eigs_B = np.linalg.eigvalsh(B)[1:]
+
+    # For each pair in ascending order, compute the lower bound for epsilon
+    eps_vals = (eigs_B - eigs_A) / eigs_A
+
+    # Pick the greatest lower bound
+    return np.max(eps_vals)
+
+
 # Plots the diffusion of the signal x on the hypergraph H, according to L_H
 def plot_diffusion(H, x, num_steps=1):
     # Plot the hypergraph, and color nodes according to signal values

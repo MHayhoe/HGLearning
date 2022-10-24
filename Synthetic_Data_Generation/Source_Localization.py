@@ -2,7 +2,7 @@ import numpy as np
 import torch
 from alegnn.utils.dataTools import _dataForClassification
 from sklearn.metrics import f1_score
-# from torchmetrics.functional import f1_score
+# from torchmetrics import F1Score
 from scipy.special import softmax
 from tqdm import tqdm
 from Utils import plot_diffusions_hg
@@ -69,7 +69,7 @@ class hypergraphSources(_dataForClassification):
         nTrain (int): number of training samples
         nValid (int): number of validation samples
         nTest (int): number of testing samples
-        sourceNodes (list of int): list of indices of nodes to be used as
+        sourceEdges (list of int): list of indices of hyperedges to be used as
             sources of the diffusion process
         tMax (int): maximum diffusion time, if None, the maximum diffusion time
             is the size of the graph (default: None)
@@ -122,21 +122,23 @@ class hypergraphSources(_dataForClassification):
 
     """
 
-    def __init__(self, H, nTrain, nValid, nTest, sourceEdges, tMax=None, noiseParams=None, doPlots=False, SC=None,
-                 dataType=np.float64, device='cpu', num_folds=None):
+    def __init__(self, G, nTrain, nValid, nTest, sourceEdges, tMax=None, SC=None, noiseParams=None,
+                 doPlots=False, dataType=np.float64, device='cpu', num_folds=None):
         # Initialize parent
         super().__init__()
         # store attributes
         self.dataType = dataType
         self.device = device
+
+        # Get data masks
         self.nTrain = nTrain
-        self.nValid = nValid
+        self.nValid = snValid
         self.nTest = nTest
         # total number of samples
-        nTotal = nTrain + nValid + nTest
-        self.nTotal = nTotal
-        self.sourceEdges = sourceEdges
+        self.nTotal = self.nTrain + self.nValid + self.nTest
+        self.targets = sourceEdges
         self.rng = np.random.default_rng()
+        self.metric = self.f1Score
         # If no tMax is specified, set it the maximum possible.
         if tMax is None:
             tMax = H.N
@@ -148,7 +150,7 @@ class hypergraphSources(_dataForClassification):
 
         # \\\ Generate the samples
         # sample source nodes
-        sampledSources = np.random.choice(sourceEdges, size=nTotal)
+        sampledSources = np.random.choice(self.targets, size=nTotal)
         # sample diffusion times
         sampledTimes = np.random.choice(np.arange(1, tMax), size=nTotal)
 
@@ -157,7 +159,7 @@ class hypergraphSources(_dataForClassification):
         # and diffuse for tMax steps.
         signals_dict = {}
         labels_dict = {}
-        for hedge_ind in sourceEdges:
+        for hedge_ind in self.targets:
             # Construct the initial node signal
             hedge = H.hyperedges[hedge_ind]
             x0 = np.array([1 if node_ind in hedge else 0 for node_ind in range(H.N)])
@@ -172,12 +174,12 @@ class hypergraphSources(_dataForClassification):
 
         # Plot the diffusions
         if doPlots:
-            plot_diffusions_hg(SC, H, sourceEdges, signals_dict=signals_dict, save_dir='../Learning/data/sourceLoc/')
+            plot_diffusions_hg(SC, H, self.targets, signals_dict=signals_dict, save_dir='../Learning/data/sourceLoc/')
 
-        # Relabel sources as 0,...,k-1
+        # Relabel targets as 0,...,k-1
         relabeledSources = {}
         count = 0
-        for source_ind in sourceEdges:
+        for source_ind in self.targets:
             relabeledSources[source_ind] = count
             count += 1
 
@@ -228,10 +230,16 @@ class hypergraphSources(_dataForClassification):
         self.samples['test']['signals'] = signals[self.nTrain + self.nValid:, :, :]
         self.samples['test']['targets'] = labels[self.nTrain + self.nValid:self.nTotal]
 
+    # Sets the random seed
+    def set_random_seed(self, seed):
+        assert isinstance(seed, int)
+        self.rng = np.random.default_rng(seed=seed)
+
     # Sets up the cross-validation folds
     def cv_initialize_folds(self, num_folds):
         if not isinstance(num_folds, int):
             num_folds = int(num_folds)
+
         # Set up the folds, adjusting the number of samples if necessary
         self.num_folds = num_folds
         fold_size = (self.nTrain + self.nValid) // num_folds
@@ -249,7 +257,7 @@ class hypergraphSources(_dataForClassification):
         if self.num_folds is None:
             print("No folds have been specified. Run cv_initialize_folds() to set up cross-validation.")
             return
-        assert k >= 0 and k < len(self.folds)
+        assert 0 <= k < len(self.folds)
 
         signals = torch.vstack((self.samples['train']['signals'], self.samples['valid']['signals'],
                              self.samples['test']['signals']))
@@ -270,16 +278,16 @@ class hypergraphSources(_dataForClassification):
         Return the weighted F1 Score (f1 score of each class, weighted by class size)
         """
         assert average in ['weighted', 'macro', 'micro']
-        yHat = torch.argmax(torch.squeeze(yHat.detach()), dim=1)
-        y = torch.squeeze(y.detach())
-        numClasses = len(self.sourceEdges)
+        yHat = torch.argmax(yHat, dim=1).squeeze()
+        y = y.squeeze()
+        numClasses = len(self.targets)
 
         if average == 'micro':
-            TP_total = torch.zeros(1,device=self.device)
-            FP_total = torch.zeros(1,device=self.device)
-            FN_total = torch.zeros(1,device=self.device)
+            TP_total = torch.zeros(1, device=self.device)
+            FP_total = torch.zeros(1, device=self.device)
+            FN_total = torch.zeros(1, device=self.device)
         else:
-            f1score = torch.zeros(1,device=self.device)
+            f1score = torch.zeros(1, device=self.device)
 
         # Compute F1 score
         for i in range(numClasses):
@@ -311,11 +319,15 @@ class hypergraphSources(_dataForClassification):
 
         return f1score
 
+    # This is set by the architecture, so we return none
+    def getTargets(self, inds):
+        return None
+
     def evaluate(self, yHat, y, tol=1e-9):
         """
         Return the accuracy (ratio of yHat = y)
         """
-        # N = y.shape[0]
+        N = y.shape[0]
         if 'torch' in repr(self.dataType):
             #   We compute the target label (hardmax)
             # yHat = torch.argmax(yHat, dim=1)
@@ -327,17 +339,21 @@ class hypergraphSources(_dataForClassification):
             yHat = np.argmax(np.squeeze(yHat.detach().cpu().numpy()), axis=1)
             y = np.squeeze(y.detach().cpu().numpy())
             # Compute the F1 score for all classes at once (not treating classes differently)
-            errorRate = f1_score(y, yHat, average='macro')
             # errorRate = self.f1Score(yHat, y, average='micro')
-            # errorRate = self.metric(yHat, y)
+            errorRate = f1_score(y, yHat, average='weighted')
         else:
-            yHat = np.argmax(yHat, axis=1)
-            y = np.array(y)
+            # yHat = np.argmax(yHat, axis=1)
+            # y = np.array(y)
+            errorRate = f1_score(y, yHat, average='weighted')
+
             #   We compute the target label (hardmax)
             # yHat = np.argmax(yHat, axis=1)
             #   And compute the error
             # totalErrors = np.sum(np.abs(yHat - y) > tol)
             # errorRate = totalErrors.astype(self.dataType) / N
-            errorRate = f1_score(y, yHat, average='weighted')
         #   And from that, compute the accuracy
         return errorRate
+
+    def to(self, device):
+        super().to(device)
+        self.metric = self.metric.to(device)
