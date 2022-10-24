@@ -3,15 +3,6 @@
 # Adapted from code by:
 # Fernando Gama, fgama@seas.upenn.edu
 # Luana Ruiz, rubruiz@seas.upenn.edu
-"""
-Training Module
-
-Trainer classes
-
-Trainer: general trainer that just computes a loss over a training set and
-    runs an evaluation on a validation test
-
-"""
 
 import torch
 import numpy as np
@@ -21,7 +12,45 @@ import datetime
 
 from sklearn.metrics import confusion_matrix
 
+"""
+Helper functions
 
+Includes Trainer and Evaluator modules, as well as some general helper functions.
+
+"""
+
+
+# Computes the spectral similarity between two matrices A and B of the same size.
+# Finds the largest value epsilon (eps) such that (1 - eps)*lambda_i(A) <= lambda_i(B) <= (1 + eps)*lambda_i(A)
+def spectral_similarity(A, B, zero_threshold=1e-10):
+    assert A.ndim == 2 and B.ndim == 2
+    assert A.shape == B.shape
+
+    # Compute eigenvalues
+    eigs_A = np.linalg.eigvalsh(A)
+    eigs_B = np.linalg.eigvalsh(B)
+
+    # Ignoring the eigenvalues thar are zero (up to the given precision)
+    first_nonzero_eig_ind = np.min(np.where(eigs_A > zero_threshold))
+    eigs_A = eigs_A[first_nonzero_eig_ind:]
+    eigs_B = eigs_B[first_nonzero_eig_ind:]
+
+    # For each pair in ascending order, compute the lower bound for epsilon
+    eps_vals = np.abs((eigs_B - eigs_A) / eigs_A)
+
+    # Pick the greatest lower bound
+    return np.max(eps_vals)
+
+
+"""
+Training Module
+
+Trainer classes
+
+Trainer: general trainer that just computes a loss over a training set and
+    runs an evaluation on a validation test
+
+"""
 class sourceTrainer:
     """
     Trainer: general trainer that just computes a loss over a training set and
@@ -143,6 +172,11 @@ class sourceTrainer:
         else:
             realizationNo = -1
 
+        if 'integral_lipschitz' in kwargs.keys():
+            integral_lipschitz_constant = kwargs['integral_lipschitz']
+        else:
+            integral_lipschitz_constant = None
+
         if doLogging:
             from alegnn.utils.visualTools import Visualizer
             logsTB = os.path.join(self.saveDir, self.name + '-logsTB')
@@ -220,6 +254,33 @@ class sourceTrainer:
         self.trainingOptions['nBatches'] = nBatches
         self.trainingOptions['graphNo'] = graphNo
         self.trainingOptions['realizationNo'] = realizationNo
+        self.trainingOptions['integral_lipschitz_constant'] = integral_lipschitz_constant
+
+    # Computes the training loss, including a constraint penalty for the integral Lipschitz constants
+    # of the graph filtering layers. All filters are constrained to have IL constant below some
+    # pre-specified value, and this is achieved by adding log-barrier penalty terms to the loss
+    # function for each individual filter in every graph filtering layer. We then average
+    # these values to apply the penalty, since the overall penalty should not be dependent
+    # on the architecture (number/size of filtering layers) and any one filter getting close
+    # to violating the constraint will cause the whole penalty term to explode. We also perform
+    # an initial check of the filtering coefficients to ensure the randomly initialized weights
+    # do not cause the constraint to be violated, since this could cause the loss to be infinite
+    # immediately and we could not compute gradients with respect to those filters that are
+    # violating the constraints initially.
+    def IL_loss(self, yHat, y):
+        # Get the integral lipschitz penalty value, if there is one
+        integral_lipschitz_constant = self.trainingOptions['integral_lipschitz_constant']
+
+        # Compute the loss
+        loss = self.model.loss(yHat, y)
+
+        # Compute the penalty term, if necessary
+        if integral_lipschitz_constant is not None:
+            C_vals = self.model.archit.compute_IL_constant(return_all=True)
+            # loss += -1e-2 * torch.mean(torch.log(integral_lipschitz_constant - C_vals))
+            loss += 1e-2 * torch.mean(torch.exp(1*(C_vals - integral_lipschitz_constant)))
+
+        return loss
 
     def trainBatch(self, thisBatchIndices):
 
@@ -237,8 +298,13 @@ class sourceTrainer:
         # Obtain the output of the GNN
         yHatTrain = self.model.archit(xTrain)
 
+        # Take targets
+        targets = self.data.getTargets(thisBatchIndices)
+        if targets is not None:
+            yHatTrain = yHatTrain[range(len(thisBatchIndices)), targets, :]
+
         # Compute loss
-        lossValueTrain = self.model.loss(yHatTrain, yTrain)
+        lossValueTrain = self.IL_loss(yHatTrain, yTrain)
 
         # Compute gradients
         lossValueTrain.backward()
@@ -266,6 +332,7 @@ class sourceTrainer:
         xValid, yValid = self.data.getSamples('valid')
         xValid = xValid.to(self.model.device)
         yValid = yValid.to(self.model.device)
+        integral_lipschitz_constant = self.trainingOptions['integral_lipschitz_constant']
 
         # Start measuring time
         startTime = datetime.datetime.now()
@@ -275,10 +342,24 @@ class sourceTrainer:
         # account to update the learnable parameters.
         with torch.no_grad():
             # Obtain the output of the GNN
-            yHatValid = self.model.archit(xValid)
+            # yHatValid = self.model.archit(xValid)
+
+            # Use batches, for memory saving
+            yHatValid = torch.tensor([], device=self.model.device)
+            batchSize = self.trainingOptions['batchSize'][0]
+            for b in range(xValid.shape[0] // batchSize):
+                thisBatchIndices = list(range(b * batchSize, (b+1) * batchSize))
+                xValidBatch, _ = self.data.getSamples('valid', thisBatchIndices)
+                xValidBatch = xValidBatch.to(self.model.device)
+                yHatValid = torch.cat((yHatValid, self.model.archit(xValidBatch)[range(batchSize), range(batchSize), :]))
+            if xValid.shape[0] % batchSize > 0:
+                thisBatchIndices = list(range((b + 1) * batchSize, xValid.shape[0]))
+                xValidBatch, _ = self.data.getSamples('valid', thisBatchIndices)
+                xValidBatch = xValidBatch.to(self.model.device)
+                yHatValid = torch.cat((yHatValid, self.model.archit(xValidBatch)[range(batchSize), range(batchSize), :]))
 
             # Compute loss
-            lossValueValid = self.model.loss(yHatValid, yValid)
+            lossValueValid = self.IL_loss(yHatValid, yValid)
 
             # Finish measuring time
             endTime = datetime.datetime.now()
@@ -329,6 +410,8 @@ class sourceTrainer:
         graphNo = self.trainingOptions['graphNo']
         assert 'realizationNo' in self.trainingOptions.keys()
         realizationNo = self.trainingOptions['realizationNo']
+        assert 'integral_lipschitz_constant' in self.trainingOptions.keys()
+        integral_lipschitz_constant = self.trainingOptions['integral_lipschitz_constant']
 
         # Learning rate scheduler:
         if doLearningRateDecay:
@@ -336,6 +419,12 @@ class sourceTrainer:
                 self.model.optim, learningRateDecayPeriod, learningRateDecayRate)
         else:
             lr_print = self.model.optim.param_groups[0]['lr']
+
+        # Ensure the integral Lipschitz constant constraint is not immediately violated.
+        # Otherwise, the initial loss could be NaN (due to the log barrier penalties)
+        if integral_lipschitz_constant is not None:
+            self.model.archit.enforce_IL_condition(integral_lipschitz_constant)
+            print(f"IL constraint: {integral_lipschitz_constant}\nInitial IL coefficient: {self.model.archit.compute_IL_constant()}")
 
         # Initialize counters (since we give the possibility of early stopping,
         # we had to drop the 'for' and use a 'while' instead):
@@ -390,11 +479,9 @@ class sourceTrainer:
                     and (lagCount < earlyStoppingLag or (not doEarlyStopping)):
 
                 # Extract the adequate batch
-                thisBatchIndices = idxEpoch[batchIndex[batch]
-                                            : batchIndex[batch + 1]]
+                thisBatchIndices = idxEpoch[batchIndex[batch] : batchIndex[batch + 1]]
 
-                lossValueTrain, costValueTrain, timeElapsed = \
-                    self.trainBatch(thisBatchIndices)
+                lossValueTrain, costValueTrain, timeElapsed = self.trainBatch(thisBatchIndices)
 
                 # Logging values
                 if doLogging:
@@ -572,6 +659,105 @@ class sourceTrainer:
         return trainVars
 
 
+class dhgTrainer(sourceTrainer):
+    """
+    Trainer: trainer for DHG data that computes a loss over a training set and
+        runs an evaluation on a validation test
+    """
+
+    def __init__(self, model, data, nEpochs, batchSize, **kwargs):
+        super().__init__(model, data, nEpochs, batchSize, **kwargs)
+
+    def trainBatch(self, thisBatchIndices):
+        # Get the samples
+        xTrain, yTrain = self.data.getSamples('train', thisBatchIndices)
+        xTrain = xTrain.to(self.model.device)
+        yTrain = yTrain.to(self.model.device)
+
+        # Start measuring time
+        startTime = datetime.datetime.now()
+
+        # Reset gradients
+        self.model.archit.zero_grad()
+
+        # Obtain the output of the GNN
+        self.model.archit.targets = self.data.getTargets('train', thisBatchIndices)
+        yHatTrain = self.model.archit(xTrain)
+        self.model.archit.targets = None
+
+        # Compute loss
+        lossValueTrain = self.IL_loss(yHatTrain, yTrain)
+
+        # Compute gradients
+        lossValueTrain.backward()
+
+        # Optimize
+        self.model.optim.step()
+
+        # Finish measuring time
+        endTime = datetime.datetime.now()
+
+        timeElapsed = abs(endTime - startTime).total_seconds()
+
+        # Compute the accuracy
+        #   Note: Using yHatTrain.data creates a new tensor with the
+        #   same value, but detaches it from the gradient, so that no
+        #   gradient operation is taken into account here.
+        #   (Alternatively, we could use a with torch.no_grad():)
+        costTrain = self.data.evaluate(yHatTrain.data, yTrain)
+
+        return lossValueTrain.item(), costTrain.item(), timeElapsed
+
+    def validationStep(self):
+
+        # Validation:
+        xValid, yValid = self.data.getSamples('valid')
+        xValid = xValid.to(self.model.device)
+        yValid = yValid.to(self.model.device)
+        integral_lipschitz_constant = self.trainingOptions['integral_lipschitz_constant']
+
+        # Start measuring time
+        startTime = datetime.datetime.now()
+
+        # Under torch.no_grad() so that the computations carried out
+        # to obtain the validation accuracy are not taken into
+        # account to update the learnable parameters.
+        with torch.no_grad():
+            # Obtain the output of the GNN
+            self.model.archit.targets = self.data.getTargets('valid')
+            yHatValid = self.model.archit(xValid)
+            self.model.archit.targets = None
+
+            # Use batches, for memory saving
+            '''
+            yHatValid = torch.tensor([], device=self.model.device)
+            batchSize = self.trainingOptions['batchSize'][0]
+            for b in range(xValid.shape[0] // batchSize):
+                thisBatchIndices = list(range(b * batchSize, (b+1) * batchSize))
+                xValidBatch, _ = self.data.getSamples('valid', thisBatchIndices)
+                xValidBatch = xValidBatch.to(self.model.device)
+                yHatValid = torch.cat((yHatValid, self.model.archit(xValidBatch)[range(batchSize), range(batchSize), :]))
+            if xValid.shape[0] % batchSize > 0:
+                thisBatchIndices = list(range((b + 1) * batchSize, xValid.shape[0]))
+                xValidBatch, _ = self.data.getSamples('valid', thisBatchIndices)
+                xValidBatch = xValidBatch.to(self.model.device)
+                yHatValid = torch.cat((yHatValid, self.model.archit(xValidBatch)[range(batchSize), range(batchSize), :]))
+            '''
+
+            # Compute loss
+            lossValueValid = self.IL_loss(yHatValid, yValid)
+
+            # Finish measuring time
+            endTime = datetime.datetime.now()
+
+            timeElapsed = abs(endTime - startTime).total_seconds()
+
+            # Compute accuracy:
+            costValid = self.data.evaluate(yHatValid, yValid)
+
+        return lossValueValid.item(), costValid.item(), timeElapsed
+
+
 """
 evaluation.py Evaluation Module
 
@@ -581,6 +767,116 @@ evaluate: evaluate a model
 evaluateSingleNode: evaluate a model that has a single node forward
 evaluateFlocking: evaluate a model using the flocking cost
 """
+
+
+def dhgEvaluate(model, data, **kwargs):
+    """
+        evaluate: evaluate a model using classification error
+
+        Input:
+            model (model class): class from Modules.model
+            data (data class): a data class from the Utils.dataTools; it needs to
+                have a getSamples method and an evaluate method.
+            doPrint (optional, bool): if True prints results
+
+        Output:
+            evalVars (dict): 'errorBest' contains the error rate for the best
+                model, and 'errorLast' contains the error rate for the last model
+        """
+
+    # Get the device we're working on
+    device = model.device
+
+    if 'doSaveVars' in kwargs.keys():
+        doSaveVars = kwargs['doSaveVars']
+    else:
+        doSaveVars = True
+    if 'batchSize' in kwargs.keys():
+        batchSize = kwargs['batchSize']
+    else:
+        batchSize = 100
+
+    ########
+    # DATA #
+    ########
+    # \\\ If CUDA is selected, empty cache:
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    xTest, yTest = data.getSamples('test')
+    xTest = xTest.to(device)
+    yTest = yTest.to(device)
+
+    ##############
+    # BEST MODEL #
+    ##############
+
+    model.load(label='Best')
+
+    with torch.no_grad():
+        # Process the samples
+        yHatTest = model.archit.forwardBatch(data, 'test', batchSize=batchSize)
+        # yHatTest is of shape
+        #   testSize x numberOfClasses
+        # We compute the error
+        costBest = data.evaluate(yHatTest, yTest)
+
+        # Confusion matrices
+        yHat_np = yHatTest.detach().squeeze().cpu().numpy()
+        if yHat_np.ndim > 1:
+            yHat_np = np.argmax(yHat_np, axis=1)
+        y_np = yTest.detach().squeeze().cpu().numpy()
+        if y_np.ndim > 1:
+            y_np = np.argmax(y_np, axis=1)
+        confusionMatrixBest = confusion_matrix(y_np, yHat_np)
+
+        # Integral Lipsschitz constant (if it exists, otherwise returns None)
+        IL_C_best = model.archit.compute_IL_constant().item()
+        print(IL_C_best)
+
+    ##############
+    # LAST MODEL #
+    ##############
+
+    model.load(label='Last')
+
+    with torch.no_grad():
+        # Process the samples
+        yHatTest = model.archit.forwardBatch(data, 'test', batchSize=batchSize)
+        # yHatTest is of shape
+        #   testSize x numberOfClasses
+        # We compute the error
+        costLast = data.evaluate(yHatTest, yTest)
+
+        # Confusion matrices
+        yHat_np = yHatTest.detach().squeeze().cpu().numpy()
+        if yHat_np.ndim > 1:
+            yHat_np = np.argmax(yHat_np, axis=1)
+        y_np = yTest.detach().squeeze().cpu().numpy()
+        if y_np.ndim > 1:
+            y_np = np.argmax(y_np, axis=1)
+        confusionMatrixLast = confusion_matrix(y_np, yHat_np)
+
+        # Integral Lipsschitz constant (if it exists, otherwise returns None)
+        IL_C_last = model.archit.compute_IL_constant().item()
+
+    # Save the evaluation of the best and last models
+    evalVars = {'costBest': costBest.item(),
+                'costLast': costLast.item(),
+                'confusionMatrixBest': confusionMatrixBest,
+                'confusionMatrixLast': confusionMatrixLast,
+                'IL_constant_best': IL_C_best,
+                'IL_constant_last': IL_C_last}
+
+    if doSaveVars:
+        saveDirVars = os.path.join(model.saveDir, 'evalVars')
+        if not os.path.exists(saveDirVars):
+            os.makedirs(saveDirVars)
+        pathToFile = os.path.join(saveDirVars, model.name + 'evalVars.pkl')
+        with open(pathToFile, 'wb') as evalVarsFile:
+            pickle.dump(evalVars, evalVarsFile)
+
+    return evalVars
 
 
 def sourceEvaluate(model, data, **kwargs):
@@ -636,6 +932,10 @@ def sourceEvaluate(model, data, **kwargs):
         y_np = np.squeeze(yTest.detach().cpu().numpy())
         confusionMatrixBest = confusion_matrix(y_np, yHat_np)
 
+        # Integral Lipsschitz constant (if it exists, otherwise returns None)
+        IL_C_best = model.archit.compute_IL_constant().item()
+        print(IL_C_best)
+
     ##############
     # LAST MODEL #
     ##############
@@ -655,12 +955,16 @@ def sourceEvaluate(model, data, **kwargs):
         y_np = np.squeeze(yTest.detach().cpu().numpy())
         confusionMatrixLast = confusion_matrix(y_np, yHat_np)
 
+        # Integral Lipsschitz constant (if it exists, otherwise returns None)
+        IL_C_last = model.archit.compute_IL_constant().item()
+
     # Save the evaluation of the best and last models
-    evalVars = {}
-    evalVars['costBest'] = costBest.item()
-    evalVars['costLast'] = costLast.item()
-    evalVars['confusionMatrixBest'] = confusionMatrixBest
-    evalVars['confusionMatrixLast'] = confusionMatrixLast
+    evalVars = {'costBest': costBest.item(),
+                'costLast': costLast.item(),
+                'confusionMatrixBest': confusionMatrixBest,
+                'confusionMatrixLast': confusionMatrixLast,
+                'IL_constant_best': IL_C_best,
+                'IL_constant_last': IL_C_last}
 
     if doSaveVars:
         saveDirVars = os.path.join(model.saveDir, 'evalVars')

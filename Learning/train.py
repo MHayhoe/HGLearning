@@ -58,14 +58,17 @@ startRunTime = datetime.datetime.now()
 
 # from gnn_data.dataTools import dataMisinformation
 sys.path.insert(1, os.path.abspath('../Synthetic_Data_Generation'))
+sys.path.insert(1, os.path.abspath('../Data'))
 from Source_Localization import hypergraphSources
+from DHG_datasets import dhgData
 from Hypergraphs import HG_normalized_Laplacian_from_incidence
 from architectures import LocalGNNCliqueLine, LocalGNNHGLap, LocalGNNClique, LocalGNNLine
 # from learner.aggregationGNN import AggregationGNN_DB
 # from learner.subgraphAggregationGNN import SubgraphAggregationGNN
 # from learner.trainerMisinformation import TrainerMisinformation
 # import learner.evaluatorMisinformation as EvaluateMisinformation
-from Helpers import sourceTrainer, sourceEvaluate
+from Helpers import sourceTrainer, sourceEvaluate, dhgTrainer, dhgEvaluate
+from copy import deepcopy
 
 possible_gnn_models = ['LocalGNNCliqueLine', 'LocalGNNHGLap', 'LocalGNNClique', 'LocalGNNLine']
 figSize = 7  # Overall size of the figure that contains the plot
@@ -79,7 +82,7 @@ xAxisMultiplierTrain = 5  # How many training steps in between those shown in
 
 # same as above.
 
-def train_helper(learner_params, train_params, dataset_params, directory):
+def train_helper(learner_params, train_params, dataset_params, directory, fold=None):
     save_dir = Path(directory)
     tb_dir = save_dir / 'tb'
     ckpt_dir = save_dir / 'ckpt'
@@ -117,6 +120,7 @@ def train_helper(learner_params, train_params, dataset_params, directory):
     ########
     # DATA #
     ########
+
     useGPU = True  # If true, and GPU is available, use it.
 
     print('cuda:0' if (torch.cuda.is_available()) else 'cpu')
@@ -132,9 +136,11 @@ def train_helper(learner_params, train_params, dataset_params, directory):
         incidence_matrices = [torch.tensor(X, device='cpu') for X in incidence_matrices]
         data.to('cpu')
 
-    # If we want to do CV, set it up
+    # If we want to do CV, set it up. Ensure we use the same seed for each fold
     if dataset_params['num_folds'] is not None:
+        data.set_random_seed(dataset_params['seed'])
         data.cv_initialize_folds(dataset_params['num_folds'])
+        data.cv_set_fold(fold)
 
     ############
     # TRAINING #
@@ -149,9 +155,10 @@ def train_helper(learner_params, train_params, dataset_params, directory):
     elif train_params['loss_function'] == 'CE':
         loss_function = nn.CrossEntropyLoss()
         # Ensure correct datatypes
-        data.samples['train']['targets'] = data.samples['train']['targets'].type(torch.LongTensor)
-        data.samples['valid']['targets'] = data.samples['valid']['targets'].type(torch.LongTensor)
-        data.samples['test']['targets'] = data.samples['test']['targets'].type(torch.LongTensor)
+        # data.dataType = torch.long
+        # data.samples['train']['targets'] = data.samples['train']['targets'].type(torch.LongTensor)
+        # data.samples['valid']['targets'] = data.samples['valid']['targets'].type(torch.LongTensor)
+        # data.samples['test']['targets'] = data.samples['test']['targets'].type(torch.LongTensor)
     else:
         raise ValueError('loss function in cfg not available')
 
@@ -171,8 +178,14 @@ def train_helper(learner_params, train_params, dataset_params, directory):
     else:
         raise ValueError('pooling function in cfg not available')
 
-    trainer = sourceTrainer
-    evaluator = sourceEvaluate
+    if dataset_params['data_type'] == 'sourceLoc':
+        trainer = sourceTrainer
+        evaluator = sourceEvaluate
+    elif dataset_params['data_type'] == 'dhg':
+        trainer = dhgTrainer
+        evaluator = dhgEvaluate
+    else:
+        raise ValueError('Data type not recognized')
 
     assert learner_params['gnn_model'] in possible_gnn_models, (
             'selected GNN model ' + learner_params['gnn_model'] + ' not in ' + str(possible_gnn_models))
@@ -199,7 +212,8 @@ def train_helper(learner_params, train_params, dataset_params, directory):
                          'dimReadout': learner_params['dim_readout'],
                          'GSOs': GSOs,  # Graph structure
                          'incidence_matrices': incidence_matrices,
-                         'sourceEdges': data.sourceEdges}  # Hyperparameters for the SelectionGNN (selGNN)
+                         'targets': data.targets,
+                         'do_sparse': learner_params['do_sparse']}  # Hyperparameters for the SelectionGNN (selGNN)
 
         hParamsDict = hParamsLocGNN
     elif learner_params['gnn_model'] == 'LocalGNNHGLap':
@@ -223,7 +237,7 @@ def train_helper(learner_params, train_params, dataset_params, directory):
                          'dimReadout': learner_params['dim_readout'],
                          'GSOs': HG_normalized_Laplacian_from_incidence(incidence_matrices),  # Graph structure
                          'incidence_matrices': incidence_matrices,
-                         'sourceEdges': data.sourceEdges}  # Hyperparameters for the SelectionGNN (selGNN)
+                         'targets': data.targets}  # Hyperparameters for the SelectionGNN (selGNN)
 
         hParamsDict = hParamsLocGNN
     elif learner_params['gnn_model'] == 'LocalGNNClique':
@@ -247,7 +261,7 @@ def train_helper(learner_params, train_params, dataset_params, directory):
                          'dimReadout': learner_params['dim_readout'],
                          'GSOs': [GSOs[0]],  # Graph structure
                          'incidence_matrices': incidence_matrices,
-                         'sourceEdges': data.sourceEdges}  # Hyperparameters for the SelectionGNN (selGNN)
+                         'targets': data.targets}  # Hyperparameters for the SelectionGNN (selGNN)
 
         hParamsDict = hParamsLocGNN
     elif learner_params['gnn_model'] == 'LocalGNNLine':
@@ -271,7 +285,7 @@ def train_helper(learner_params, train_params, dataset_params, directory):
                          'dimReadout': learner_params['dim_readout'],
                          'GSOs': [GSOs[1]],  # Graph structure
                          'incidence_matrices': incidence_matrices,
-                         'sourceEdges': data.sourceEdges}  # Hyperparameters for the SelectionGNN (selGNN)
+                         'targets': data.targets}  # Hyperparameters for the SelectionGNN (selGNN)
 
         hParamsDict = hParamsLocGNN
     elif learner_params['gnn_model'] == 'aggregationGNN':
@@ -337,6 +351,7 @@ def train_helper(learner_params, train_params, dataset_params, directory):
     #                           SETUP                                   #
     #                                                                   #
     #####################################################################
+
     # \\\ If CUDA is selected, empty cache:
     if useGPU and torch.cuda.is_available():
         torch.cuda.empty_cache()
@@ -364,14 +379,12 @@ def train_helper(learner_params, train_params, dataset_params, directory):
     ################
     # ARCHITECTURE #
     ################
-
-    thisArchit = callArchit(**hParamsDict)
+    thisArchit = callArchit(**deepcopy(hParamsDict))
     thisArchit.to(thisDevice)
 
     #############
     # OPTIMIZER #
     #############
-
     if train_params['optim_alg'] == 'ADAM':
         thisOptim = optim.Adam(thisArchit.parameters(),
                                lr=train_params['learning_rate'],
@@ -385,106 +398,56 @@ def train_helper(learner_params, train_params, dataset_params, directory):
     ########
     # LOSS #
     ########
-
     thisLossFunction = loss_function
 
     ###########
     # TRAINER #
     ###########
-
     thisTrainer = trainer
 
     #############
     # EVALUATOR #
     #############
-
     thisEvaluator = evaluator
 
     #########
     # MODEL #
     #########
+    modelCreated = model.Model(thisArchit, thisLossFunction, thisOptim, thisTrainer, thisEvaluator, thisDevice,
+                               thisName, save_dir)
+    modelsGNN[thisName] = modelCreated
 
-    if data.num_folds is None:
-        modelCreated = model.Model(thisArchit, thisLossFunction, thisOptim, thisTrainer, thisEvaluator, thisDevice,
-                                   thisName, save_dir)
-        modelsGNN[thisName] = modelCreated
+    ############
+    # TRAINING #
+    ############
+    print()
+    print("Training model %s..." % thisName)
 
-        print()
-        print("Training model %s..." % thisName)
-
-        if train_params['lr_decay']:
-            thisTrainVars = modelsGNN[thisName].train(data, train_params['n_epochs'], train_params['batch_size'],
-                                                        validationInterval=train_params['validation_interval'],
-                                                        printInterval=train_params['print_interval'],
-                                                        learningRateDecayRate=train_params['lr_decay_rate'],
-                                                        learningRateDecayPeriod=train_params['lr_decay_period'])
-        else:
-            thisTrainVars = modelsGNN[thisName].train(data, train_params['n_epochs'], train_params['batch_size'],
-                                                        validationInterval=train_params['validation_interval'],
-                                                        printInterval=train_params['print_interval'])
-
-        ###########
-        # TESTING #
-        ###########
-        print()
-        print("Evaluating model %s..." % thisName)
-        thisTestVars = modelsGNN[thisName].evaluate(data)
+    if train_params['lr_decay']:
+        thisTrainVars = modelsGNN[thisName].train(data, train_params['n_epochs'], train_params['batch_size'],
+                                                  validationInterval=train_params['validation_interval'],
+                                                  printInterval=train_params['print_interval'],
+                                                  learningRateDecayRate=train_params['lr_decay_rate'],
+                                                  learningRateDecayPeriod=train_params['lr_decay_period'],
+                                                  integral_lipschitz=train_params['integral_lipschitz_constant'])
     else:
-        trainVarsCV = []
-        testVarsCV = []
-        for k in range(data.num_folds):
-            # Set up the folds of data for cross-validation
-            data.cv_set_fold(k)
-            modelCreated = model.Model(thisArchit, thisLossFunction, thisOptim, thisTrainer, thisEvaluator, thisDevice,
-                                       thisName, save_dir)
-            modelsGNN[thisName] = modelCreated
+        thisTrainVars = modelsGNN[thisName].train(data, train_params['n_epochs'], train_params['batch_size'],
+                                                  validationInterval=train_params['validation_interval'],
+                                                  printInterval=train_params['print_interval'],
+                                                  integral_lipschitz=train_params['integral_lipschitz_constant'])
 
-            print()
-            print("Training model %s..." % thisName)
-
-            if train_params['lr_decay']:
-                trainVarsCV.append( modelsGNN[thisName].train(data, train_params['n_epochs'], train_params['batch_size'],
-                                                          validationInterval=train_params['validation_interval'],
-                                                          printInterval=train_params['print_interval'],
-                                                          learningRateDecayRate=train_params['lr_decay_rate'],
-                                                          learningRateDecayPeriod=train_params['lr_decay_period']) )
-            else:
-                trainVarsCV.append( modelsGNN[thisName].train(data, train_params['n_epochs'], train_params['batch_size'],
-                                                          validationInterval=train_params['validation_interval'],
-                                                          printInterval=train_params['print_interval']) )
-
-            ###########
-            # TESTING #
-            ###########
-            print()
-            print("Evaluating model %s..." % thisName)
-            testVarsCV.append( modelsGNN[thisName].evaluate(data) )
-
-        # Average across the cross-validation folds
-        thisTrainVars = trainVarsCV[0]
-        thisTestVars = testVarsCV[0]
-        train_keys = ['lossTrain', 'costTrain', 'lossValid', 'costValid', 'costValidBest']
-        test_keys = ['costBest', 'costLast', 'confusionMatrixBest', 'confusionMatrixLast']
-
-        for key_name in train_keys:
-            stacked_vars = np.stack([trainVarsCV[fold_ind][key_name] for fold_ind in range(data.num_folds)])
-            thisTrainVars[key_name] = np.mean(stacked_vars, axis=0)
-            thisTrainVars[key_name + '_std'] = np.std(stacked_vars, axis=0)
-
-        for key_name in test_keys:
-            stacked_vars = np.stack([testVarsCV[fold_ind][key_name] for fold_ind in range(data.num_folds)])
-            thisTestVars[key_name] = np.mean(stacked_vars, axis=0)
-            thisTestVars[key_name + '_std'] = np.std(stacked_vars, axis=0)
+    ###########
+    # TESTING #
+    ###########
+    print()
+    print("Evaluating model %s..." % thisName)
+    thisTestVars = modelsGNN[thisName].evaluate(data)
 
     writeVarValues(varsFile,
                    {'costBestl%s%03dR%02d' % \
                     (thisName, 1, 1): thisTestVars['costBest'],
                     'costLast%s%03dR%02d' % \
                     (thisName, 1, 1): thisTestVars['costLast']})
-
-    print()
-    print("Saving figures...")
-    create_plots(save_dir, thisTrainVars, thisTestVars)
 
     if cmd_args.saveModel:
         print()
@@ -680,10 +643,11 @@ def create_plots(save_dir, trainVars, testVars):
     fig.savefig(os.path.join(save_dir, 'figs.png'), dpi=200)
 
 
-def run_experiment(args, section_name=''):
+def run_experiment(args, section_name='', fold=None):
     train_params = {
         'n_epochs': args.getint('n_epochs', 50),
         'batch_size': args.getint('batch_size', 20),
+        'integral_lipschitz_constant': args.getfloat('integral_lipschitz_constant', None),
         'learning_rate': args.getfloat('learning_rate', 0.05),
         'loss_function': args.get('loss_function', 'MSE'),
         'nonlinearity': args.get('nonlinearity', 'Sigmoid'),
@@ -709,12 +673,14 @@ def run_experiment(args, section_name=''):
         'time_delay': args.getint('time_delay', '6'),
         'num_exchanges': args.getint('num_exchanges', '3'),
         'num_GSOs': args.getint('num_GSOs', '1'),
+        'do_sparse': args.getboolean('do_sparse', False),
         'interaction_effects': args.getboolean('interaction_effects', False),
         'summary_statistics': ast.literal_eval(args.get('summary_statistics', "['mean']")),
         'embedding_pooling': ast.literal_eval(args.get('embedding_pooling', "['mean']"))
     }
 
     dataset_params = {
+        'data_type': args.get('data_type', 'sourceLoc'),
         'matrix_path': args.get('matrix_path', 'data/sourceLoc/sourceLoc'),
         'data_path': args.get('data_path', 'data/sourceLoc/sourceLoc_data.pkl'),
         'num_folds': args.get('num_folds', None),
@@ -733,33 +699,88 @@ def run_experiment(args, section_name=''):
         learner_params=learner_params,
         train_params=train_params,
         dataset_params=dataset_params,
-        directory=directory)
+        directory=directory,
+        fold=fold)
 
     return trainVars, testVars
+
+
+# Run multiple experiments, one per fold.
+def run_CV(args, section_name=''):
+    # Get the number of folds for cross-validation
+    num_folds = args.getint('num_folds', None)
+
+    if num_folds is None:
+        thisTrainVars, thisTestVars = run_experiment(args, section_name, fold=None)
+    else:
+        trainVarsCV = []
+        testVarsCV = []
+
+        for k in range(num_folds):
+            trainVarsExperiment, testVarsExperiment = run_experiment(args, section_name, fold=k)
+            trainVarsCV.append(trainVarsExperiment)
+            testVarsCV.append(testVarsExperiment)
+
+        thisTrainVars = trainVarsCV[0]
+        thisTestVars = testVarsCV[0]
+
+        # Average across the cross-validation folds
+        train_keys = ['lossTrain', 'costTrain', 'lossValid', 'costValid', 'costValidBest']
+        test_keys = ['costBest', 'costLast', 'confusionMatrixBest', 'confusionMatrixLast']
+
+        for key_name in train_keys:
+            stacked_vars = np.stack([trainVarsCV[k][key_name] for k in range(num_folds)])
+            thisTrainVars[key_name] = np.mean(stacked_vars, axis=0)
+            thisTrainVars[key_name + '_std'] = np.std(stacked_vars, axis=0)
+
+        for key_name in test_keys:
+            stacked_vars = np.stack([testVarsCV[k][key_name] for k in range(num_folds)])
+            thisTestVars[key_name] = np.mean(stacked_vars, axis=0)
+            thisTestVars[key_name + '_std'] = np.std(stacked_vars, axis=0)
+
+        # Take maximum for integral Lipschitz constant
+        if thisTestVars['IL_constant_best'] is not None:
+            thisTestVars['IL_constant_best'] = [testVarsCV[k]['IL_constant_best'] for k in range(num_folds)]
+
+    # Plot results
+    print()
+    print("Saving figures...")
+    today = datetime.datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
+    directory = Path('models/' + args.get('name', 'localGNNCliqueLine') + '/' + today + section_name + '_CV')
+    os.mkdir(directory)
+    create_plots(directory, thisTrainVars, thisTestVars)
+
+    # Return the training and testing variables and performance
+    return thisTrainVars, thisTestVars
 
 
 # Take the output from training and write to a single CSV
 def summarize_cv(cvParams):
     name = cvParams[list(cvParams.keys())[0]]['config'].get('name', 'localGNNCliqueLine')
     today = datetime.datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
-    directory = 'models/' + name + '/' + today + '_CV'
+    directory = 'models/' + name + '/' + today + '_CV_summary'
     os.mkdir(directory)
 
     with open(directory + '/CV.csv', 'w', newline='') as csvfile:
         writer = csv.writer(csvfile, delimiter=',')
-        writer.writerow(['Name','Train Cost','Validation Cost','Validation Best','Test Cost', '# Epochs',
-                         'LR', 'LR Decay Rate', 'LR Decay Period', '# Features', '# Filter Taps','Readout'])
+        writer.writerow(['Name', 'Train Cost', 'Validation Cost', 'Validation Mean',
+                         'Validation Std', 'UCB', 'LCB', 'Test Mean', 'Test Std', '# Epochs',
+                         'LR', 'LR Decay Rate', 'LR Decay Period', '# Features', '# Filter Taps', 'Readout',
+                         'C_real', 'C_limit'])
 
         for section_name, vars in cvParams.items():
             trainVars = vars['trainVars']
             testVars = vars['testVars']
             config = vars['config']
             writer.writerow([config.get('gnn_model'), trainVars['costTrain'], trainVars['costValid'],
-                             str(trainVars['costValidBest']) + ' +/- ' + str(trainVars['costValidBest_std']),
-                             str(testVars['costBest']) + ' +/- ' + str(testVars['costBest_std']),
+                             trainVars['costValidBest'], trainVars['costValidBest_std'],
+                             trainVars['costValidBest'] + trainVars['costValidBest_std'],
+                             trainVars['costValidBest'] - trainVars['costValidBest_std'],
+                             testVars['costBest'], testVars['costBest_std'],
                              config.get('n_epochs'), config.get('learning_rate'), config.get('lr_decay_rate'),
                              config.get('lr_decay_period'), config.get('dim_features'), config.get('num_filter_taps'),
-                             config.get('dim_readout')])
+                             config.get('dim_readout'), testVars['IL_constant_best'],
+                             config.get('integral_lipschitz_constant')])
 
 
 def main():
@@ -772,7 +793,7 @@ def main():
 
     if config.sections():
         for section_name in config.sections():
-            trainVars, testVars = run_experiment(config[section_name], section_name)
+            trainVars, testVars = run_CV(config[section_name], section_name)
             cvParams[section_name] = {'trainVars': trainVars, 'testVars': testVars, 'config': config[section_name]}
         summarize_cv(cvParams)
     else:
